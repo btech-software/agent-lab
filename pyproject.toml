@@ -25,7 +25,7 @@ dependencies = [
     "browser-use",
     "charset-normalizer~=3.4.7",
     "ddgs~=9.14.4",
-    "dependency-injector~=4.48.3",
+    "dependency-injector>=4.48.3,<4.50.0",
     "fastapi-keycloak-middleware~=1.6.0",
     "fastmcp~=3.4.4",
     "fastapi[standard]~=0.139.0",
