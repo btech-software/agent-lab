@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from agent_lab.core.config import (
     KubernetesVaultConfigSource,
+    VaultConfigSource,
     YamlConfigSource,
     default_config_source,
 )
@@ -48,6 +49,32 @@ def test_kubernetes_source_logs_in_with_service_account_token(tmp_path):
     assert config["api_base_url"] == APP_SECRETS["api_base_url"]
     assert config["broker"]["url"] == APP_SECRETS["broker_url"]
     assert config["db"]["checkpoints"] == APP_SECRETS["db_checkpoints"]
+
+
+def _load_vault_config():
+    source = VaultConfigSource(url="http://vault:8200", token="root")
+    with patch("hvac.Client") as client_cls:
+        client_cls.return_value.secrets.kv.read_secret_version.return_value = {
+            "data": {"data": APP_SECRETS}
+        }
+        return source.load()
+
+
+def test_vault_source_disables_static_when_directory_missing(monkeypatch, tmp_path):
+    monkeypatch.setenv("STATIC_DIR", str(tmp_path / "missing"))
+
+    config = _load_vault_config()
+
+    assert config["static"]["enabled"] is False
+
+
+def test_vault_source_enables_static_when_directory_exists(monkeypatch, tmp_path):
+    monkeypatch.setenv("STATIC_DIR", str(tmp_path))
+
+    config = _load_vault_config()
+
+    assert config["static"]["enabled"] is True
+    assert config["static"]["directory"] == str(tmp_path)
 
 
 def test_default_config_source_prefers_kubernetes_role(monkeypatch):
