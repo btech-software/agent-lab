@@ -6,7 +6,7 @@
     "author_name": "Your Name",
     "author_email": "you@example.com",
     "github_repository": "your-org/{{ cookiecutter.project_slug }}",
-    "agent_lab_version": "1.16.0",
+    "agent_lab_version": "1.16.1",
     "include_docker": true,
     "include_github_actions": true,
     "include_testcontainers": true,

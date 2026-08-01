@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.16.1 (2026-08-01)
+
+### Bug Fixes
+
+- Project dependencies update ([#367](https://github.com/btech-software/agent-lab/pull/367),
+  [`3a64f60`](https://github.com/btech-software/agent-lab/commit/3a64f60af8556139644086e6becae4db9f669e8e))
+
+- Static file server adjust ([#367](https://github.com/btech-software/agent-lab/pull/367),
+  [`3a64f60`](https://github.com/btech-software/agent-lab/commit/3a64f60af8556139644086e6becae4db9f669e8e))
+
+- Static web pages release (3) ([#367](https://github.com/btech-software/agent-lab/pull/367),
+  [`3a64f60`](https://github.com/btech-software/agent-lab/commit/3a64f60af8556139644086e6becae4db9f669e8e))
+
+
 ## v1.16.0 (2026-07-24)
 
 ### Features
