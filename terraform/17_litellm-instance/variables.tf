@@ -11,7 +11,7 @@ variable "pg_image" {
 
 variable "litellm_chart_version" {
   type        = string
-  default     = "0.1.100"
+  default     = "1.103.2"
   description = "litellm-helm chart version (OCI: ghcr.io/berriai/litellm-helm)"
 }
 

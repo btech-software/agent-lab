@@ -116,8 +116,11 @@ resource "kubernetes_secret_v1" "litellm_env" {
 }
 
 # LiteLLM proxy (open-source, monolithic mode) from the official chart.
-# 0.1.100 ships no migration Job: with DATABASE_URL set the proxy applies the
-# prisma schema itself at startup (single replica, so no race).
+# The chart's migration Job is disabled: with DATABASE_URL set the proxy applies
+# the prisma schema itself at startup (single replica, so no race). Under
+# Terraform the Job would run concurrently with the Deployment, not before it.
+# Chart >= 1.x also drops 0.1.100's hardcoded db-ready init container, which
+# pulled docker.io/bitnami/postgresql (tag since removed from that repo).
 resource "helm_release" "litellm" {
   name       = "litellm"
   repository = "oci://ghcr.io/berriai"
@@ -131,17 +134,20 @@ resource "helm_release" "litellm" {
 
       image = {
         repository = "ghcr.io/berriai/litellm"
-        # Chart 0.1.100 ships appVersion "latest"; an explicit tag keeps
-        # rollbacks deterministic (docs: never run :latest or a moving tag).
+        # Pinned explicitly rather than inherited from the chart appVersion,
+        # keeping rollbacks deterministic (docs: never run :latest or a moving tag).
         tag        = var.litellm_image_tag
         pullPolicy = "IfNotPresent"
       }
 
-      # Chart 0.1.100 unconditionally creates the <fullname>-masterkey secret
-      # and wires PROXY_MASTER_KEY to it (no masterkeySecretName support), so
-      # the key is supplied via the masterkey value to keep it deterministic
-      # across upgrades — otherwise every upgrade would mint a new random key.
+      # The chart creates the <fullname>-masterkey secret and wires
+      # PROXY_MASTER_KEY to it; the key is supplied via the masterkey value so
+      # it stays deterministic and owned by Terraform state.
       masterkey = random_password.master_key.result
+
+      migrationJob = {
+        enabled = false
+      }
 
       environmentSecrets = [kubernetes_secret_v1.litellm_env.metadata[0].name]
 
