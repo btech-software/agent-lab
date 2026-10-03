@@ -170,6 +170,7 @@ class AgentBase(ABC):
             openai_api_base=api_endpoint,
             openai_api_key=api_key,
             check_embedding_ctx_length=False,
+            chunk_size=100,
         )
 
     def get_chat_model(

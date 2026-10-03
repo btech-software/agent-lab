@@ -126,6 +126,7 @@ class AttachmentService:
             openai_api_base=api_endpoint,
             openai_api_key=api_key,
             check_embedding_ctx_length=False,
+            chunk_size=100,
         )
 
         attachment = self.attachment_repository.get_by_id(attachment_id, schema)
