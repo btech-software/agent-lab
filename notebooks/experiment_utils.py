@@ -257,6 +257,46 @@ def update_agent_setting(
     )
 
 
+def update_language_model_setting(
+    language_model_id: str,
+    setting_key: str,
+    setting_value: str,
+    agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
+) -> dict:
+    return _post(
+        "/llms/update_setting",
+        agent_lab_endpoint,
+        json={
+            "language_model_id": language_model_id,
+            "setting_key": setting_key,
+            "setting_value": setting_value,
+        },
+    )
+
+
+def enable_jev(
+    agent_id: str,
+    api_key: str,
+    api_endpoint: str = "https://api.typesafe.ai",
+    agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
+) -> dict:
+    # route the agent's grading decisions through a typesafe_api_v1 integration
+    integration = _post(
+        "/integrations/create",
+        agent_lab_endpoint,
+        json={
+            "integration_type": "typesafe_api_v1",
+            "api_endpoint": api_endpoint,
+            "api_key": api_key,
+        },
+    )
+    update_agent_setting(agent_id, "decision_engine", "jev", agent_lab_endpoint)
+    update_agent_setting(
+        agent_id, "jev_integration_id", integration["id"], agent_lab_endpoint
+    )
+    return integration
+
+
 def openai_responses_api_mcp_tool_request(
     query: str,
     mcp_server: dict,
