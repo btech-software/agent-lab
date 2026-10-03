@@ -67,6 +67,24 @@ def join_messages(left: List, right: List) -> List:
     return unique_messages
 
 
+def _structured_output_method(lm_settings_dict: dict) -> str | None:
+    # absent (pre-existing models) or "default" keeps the library default
+    method = lm_settings_dict.get("structured_output_method")
+    return None if method in (None, "default") else method
+
+
+class StructuredOutputChatOpenAI(ChatOpenAI):
+    # default with_structured_output method, set per language model; models
+    # differ in which method they handle reliably (e.g. gpt-oss needs
+    # function_calling on ollama). None keeps the library default.
+    structured_output_method: str | None = None
+
+    def with_structured_output(self, schema=None, **kwargs):
+        if self.structured_output_method is not None:
+            kwargs.setdefault("method", self.structured_output_method)
+        return super().with_structured_output(schema, **kwargs)
+
+
 class AgentUtils:
     def __init__(
         self,
@@ -200,10 +218,11 @@ class AgentBase(ABC):
             guardrail_kwargs["timeout"] = float(lm_settings_dict["timeout"])
 
         if integration.integration_type == "openai_api_v1":
-            return ChatOpenAI(
+            return StructuredOutputChatOpenAI(
                 model_name=language_model_tag,
                 openai_api_base=api_endpoint,
                 openai_api_key=api_key,
+                structured_output_method=_structured_output_method(lm_settings_dict),
                 **guardrail_kwargs,
             )
         elif integration.integration_type == "xai_api_v1":

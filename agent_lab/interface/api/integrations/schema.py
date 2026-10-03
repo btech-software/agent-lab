@@ -10,6 +10,7 @@ integration_valid_types = [
     "anthropic_api_v1",
     "xai_api_v1",
     "openai_api_v1",
+    "typesafe_api_v1",
 ]
 
 

@@ -6,7 +6,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.constants import START, END
 from langgraph.graph import StateGraph, MessagesState
 from langgraph.managed import RemainingSteps
-from typing_extensions import Annotated, List, Literal
+from typesafe_sdk import Noul, TypeSafeClient
+from typing_extensions import Annotated, Callable, List, Literal
 
 from agent_lab.interface.api.messages.schema import MessageRequest
 from agent_lab.services.agent_types.adaptive_rag.schema import (
@@ -21,6 +22,9 @@ from agent_lab.services.agent_types.base import (
 )
 from agent_lab.services.tasks import TaskProgress
 from agent_lab.services.agent_types.registration import discoverable_agent
+
+# minimum jev noul probability for a 'yes' decision
+JEV_DECISION_THRESHOLD = 0.5
 
 
 class AgentState(MessagesState):
@@ -37,6 +41,8 @@ class AgentState(MessagesState):
     query_rewriter_system_prompt: str
     answer_grader_system_prompt: str
     retrieval_grader_system_prompt: str
+    decision_engine: str
+    jev_integration_id: str
 
 
 @discoverable_agent("adaptive_rag")
@@ -97,6 +103,20 @@ class AdaptiveRagAgent(WebAgentBase):
             schema=schema,
         )
 
+        # grading decisions: "llm" (default) or "jev" via a typesafe_api_v1 integration
+        self.agent_setting_service.create_agent_setting(
+            agent_id=agent_id,
+            setting_key="decision_engine",
+            setting_value="llm",
+            schema=schema,
+        )
+        self.agent_setting_service.create_agent_setting(
+            agent_id=agent_id,
+            setting_key="jev_integration_id",
+            setting_value="",
+            schema=schema,
+        )
+
     def format_response(self, workflow_state: AgentState) -> (str, dict):
         return workflow_state.get("generation"), {
             "agent_id": workflow_state.get("agent_id"),
@@ -108,6 +128,34 @@ class AdaptiveRagAgent(WebAgentBase):
                 document.page_content for document in workflow_state.get("documents")
             ],
         }
+
+    def ask_jev(self, state: AgentState, jev_state: dict, instructions: str) -> bool:
+        integration = self.integration_service.get_integration_by_id(
+            state["jev_integration_id"], state["schema"]
+        )
+        api_endpoint, api_key = self.get_integration_credentials(integration)
+        with TypeSafeClient(api_key=api_key, base_url=api_endpoint) as client:
+            answers = client.system_one(
+                state=jev_state,
+                questions={"decision": Noul(instructions=instructions)},
+            ).answers
+        return answers["decision"].noul >= JEV_DECISION_THRESHOLD
+
+    def decide(
+        self,
+        state: AgentState,
+        llm_decision: Callable[[], bool],
+        jev_state: dict,
+        instructions: str,
+    ) -> bool:
+        if state.get("decision_engine") == "jev":
+            try:
+                return self.ask_jev(state, jev_state, instructions)
+            except Exception as e:
+                self.logger.warning(
+                    f"Agent[{state['agent_id']}] -> JEV decision failed, falling back to LLM -> {e}"
+                )
+        return llm_decision()
 
     def get_query_rewriter(self, chat_model, query_rewriter_system_prompt):
         re_write_prompt = ChatPromptTemplate.from_messages(
@@ -146,16 +194,22 @@ class AdaptiveRagAgent(WebAgentBase):
         remaining_steps = state["remaining_steps"]
         answer_grader_system_prompt = state["answer_grader_system_prompt"]
         limit_remaining_steps = 10
+
+        def llm_decision() -> bool:
+            score = self.get_answer_grader(
+                chat_model, answer_grader_system_prompt
+            ).invoke({"query": query, "generation": generation})
+            return score is not None and score["binary_score"] == "yes"
+
         # Check question-answering
-        score = self.get_answer_grader(chat_model, answer_grader_system_prompt).invoke(
-            {"query": query, "generation": generation}
+        is_complete = self.decide(
+            state,
+            llm_decision,
+            jev_state={"query": query, "answer": generation},
+            instructions=answer_grader_system_prompt,
         )
 
-        grade = None
-        if score is not None:
-            grade = score["binary_score"]
-
-        if grade == "yes" or remaining_steps <= limit_remaining_steps:
+        if is_complete or remaining_steps <= limit_remaining_steps:
             return "complete_answer"
 
         return "incomplete_answer"
@@ -281,18 +335,20 @@ class AdaptiveRagAgent(WebAgentBase):
             )
         )
         for d in documents:
-            score = self.get_retrieval_grader(
-                chat_model, retrieval_grader_system_prompt
-            ).invoke({"query": query, "document": d.page_content})
 
-            grade = None
-            if score is not None:
-                grade = score["binary_score"]
+            def llm_decision() -> bool:
+                score = self.get_retrieval_grader(
+                    chat_model, retrieval_grader_system_prompt
+                ).invoke({"query": query, "document": d.page_content})
+                return score is not None and score["binary_score"] == "yes"
 
-            if grade == "yes":
+            if self.decide(
+                state,
+                llm_decision,
+                jev_state={"query": query, "document": d.page_content},
+                instructions=retrieval_grader_system_prompt,
+            ):
                 filtered_docs.append(d)
-            else:
-                continue
 
         self.task_notification_service.publish_update(
             task_progress=TaskProgress(
@@ -391,5 +447,7 @@ class AdaptiveRagAgent(WebAgentBase):
             "retrieval_grader_system_prompt": self.parse_prompt_template(
                 settings_dict, "retrieval_grader_system_prompt", template_vars
             ),
+            "decision_engine": settings_dict.get("decision_engine", "llm"),
+            "jev_integration_id": settings_dict.get("jev_integration_id", ""),
             "messages": [],
         }

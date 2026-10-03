@@ -111,6 +111,52 @@ class TestGetChatModel:
         assert chat_model.max_tokens == 8192
         assert chat_model.request_timeout == pytest.approx(600.0)
 
+    @patch.object(ChatOpenAI, "with_structured_output")
+    def test_structured_output_method_setting_applied(self, parent_method):
+        agent = _make_agent("openai_api_v1")
+        agent.language_model_setting_service.get_language_model_settings.return_value = [
+            _setting("structured_output_method", "function_calling"),
+        ]
+
+        agent.get_chat_model("agent-1", "test", "gpt-oss:20b").with_structured_output(
+            dict
+        )
+
+        parent_method.assert_called_once_with(dict, method="function_calling")
+
+    @patch.object(ChatOpenAI, "with_structured_output")
+    def test_structured_output_explicit_method_wins(self, parent_method):
+        agent = _make_agent("openai_api_v1")
+        agent.language_model_setting_service.get_language_model_settings.return_value = [
+            _setting("structured_output_method", "function_calling"),
+        ]
+
+        agent.get_chat_model("agent-1", "test", "gpt-oss:20b").with_structured_output(
+            dict, method="json_mode"
+        )
+
+        parent_method.assert_called_once_with(dict, method="json_mode")
+
+    @patch.object(ChatOpenAI, "with_structured_output")
+    def test_structured_output_default_setting_keeps_default(self, parent_method):
+        agent = _make_agent("openai_api_v1")
+        agent.language_model_setting_service.get_language_model_settings.return_value = [
+            _setting("structured_output_method", "default"),
+        ]
+
+        agent.get_chat_model("agent-1", "test", "gpt-4o").with_structured_output(dict)
+
+        parent_method.assert_called_once_with(dict)
+
+    @patch.object(ChatOpenAI, "with_structured_output")
+    def test_structured_output_without_setting_keeps_default(self, parent_method):
+        agent = _make_agent("openai_api_v1")
+
+        agent.get_chat_model("agent-1", "test", "gpt-4o").with_structured_output(dict)
+
+        # no method passed: the library default applies
+        parent_method.assert_called_once_with(dict)
+
     def test_unsupported_integration_type_raises(self):
         agent = _make_agent("ollama_api_v1")
 
@@ -842,7 +888,7 @@ class TestAdaptiveRagAgent:
 
         agent.create_default_settings("agent-1", "test")
 
-        assert agent.agent_setting_service.create_agent_setting.call_count == 5
+        assert agent.agent_setting_service.create_agent_setting.call_count == 7
 
     def test_format_response(self):
         content, response_data = self._agent().format_response(self._state())
@@ -1013,6 +1059,114 @@ class TestAdaptiveRagAgent:
         assert params["collection_name"] == "kb"
         assert params["execution_system_prompt"] == "execute"
         assert params["messages"] == []
+        # agents created before the jev settings existed default to llm decisions
+        assert params["decision_engine"] == "llm"
+        assert params["jev_integration_id"] == ""
+
+    def test_get_input_params_jev_settings(self):
+        agent = self._agent()
+        agent.agent_setting_service.get_agent_settings.return_value = [
+            _setting("execution_system_prompt", "execute"),
+            _setting("query_rewriter_system_prompt", "rewrite"),
+            _setting("answer_grader_system_prompt", "grade"),
+            _setting("retrieval_grader_system_prompt", "grade docs"),
+            _setting("collection_name", "kb"),
+            _setting("decision_engine", "jev"),
+            _setting("jev_integration_id", "jev-int"),
+        ]
+
+        params = agent.get_input_params(_message_request(), "test")
+
+        assert params["decision_engine"] == "jev"
+        assert params["jev_integration_id"] == "jev-int"
+
+    def _jev_agent(self) -> AdaptiveRagAgent:
+        agent = self._agent()
+        agent.integration_service = MagicMock()
+        agent.get_integration_credentials = MagicMock(
+            return_value=("https://api.typesafe.ai", "ts-key")
+        )
+        return agent
+
+    def _jev_state(self, **overrides) -> dict:
+        return self._state(
+            decision_engine="jev", jev_integration_id="jev-int", **overrides
+        )
+
+    @staticmethod
+    def _jev_answers(client_cls, *nouls) -> MagicMock:
+        client = client_cls.return_value.__enter__.return_value
+        client.system_one.side_effect = [
+            MagicMock(answers={"decision": MagicMock(noul=noul)}) for noul in nouls
+        ]
+        return client
+
+    @patch("agent_lab.services.agent_types.adaptive_rag.agent.TypeSafeClient")
+    def test_grade_documents_with_jev(self, client_cls):
+        agent = self._jev_agent()
+        agent.get_retrieval_grader = MagicMock()
+        client = self._jev_answers(client_cls, 0.9, 0.5, 0.2)
+        documents = [MagicMock(page_content=f"d{i}") for i in range(3)]
+
+        result = agent.grade_documents(self._jev_state(documents=documents))
+
+        # 0.5 sits on the threshold and is kept
+        assert result["documents"] == documents[:2]
+        agent.get_retrieval_grader.assert_not_called()
+        agent.integration_service.get_integration_by_id.assert_called_with(
+            "jev-int", "test"
+        )
+        client_cls.assert_called_with(
+            api_key="ts-key", base_url="https://api.typesafe.ai"
+        )
+        call = client.system_one.call_args_list[0].kwargs
+        assert call["state"] == {"query": "what?", "document": "d0"}
+        assert call["questions"]["decision"].instructions == "grade docs"
+
+    @pytest.mark.parametrize(
+        "noul, expected", [(0.8, "complete_answer"), (0.3, "incomplete_answer")]
+    )
+    @patch("agent_lab.services.agent_types.adaptive_rag.agent.TypeSafeClient")
+    def test_grade_generation_with_jev(self, client_cls, noul, expected):
+        agent = self._jev_agent()
+        agent.get_answer_grader = MagicMock()
+        client = self._jev_answers(client_cls, noul)
+
+        result = agent.grade_generation_v_documents_and_question(self._jev_state())
+
+        assert result == expected
+        agent.get_answer_grader.assert_not_called()
+        call = client.system_one.call_args.kwargs
+        assert call["state"] == {"query": "what?", "answer": "an answer"}
+        assert call["questions"]["decision"].instructions == "grade"
+
+    @patch("agent_lab.services.agent_types.adaptive_rag.agent.TypeSafeClient")
+    def test_jev_failure_falls_back_to_llm(self, client_cls):
+        agent = self._jev_agent()
+        client_cls.return_value.__enter__.return_value.system_one.side_effect = (
+            RuntimeError("jev unavailable")
+        )
+        grader = MagicMock()
+        grader.invoke.return_value = {"binary_score": "yes"}
+        agent.get_answer_grader = MagicMock(return_value=grader)
+
+        result = agent.grade_generation_v_documents_and_question(self._jev_state())
+
+        assert result == "complete_answer"
+        grader.invoke.assert_called_once()
+
+    @patch("agent_lab.services.agent_types.adaptive_rag.agent.TypeSafeClient")
+    def test_llm_engine_never_calls_jev(self, client_cls):
+        agent = self._jev_agent()
+        grader = MagicMock()
+        grader.invoke.return_value = {"binary_score": "yes"}
+        agent.get_retrieval_grader = MagicMock(return_value=grader)
+
+        agent.grade_documents(self._state(decision_engine="llm"))
+        agent.grade_documents(self._state())  # no decision_engine in state
+
+        client_cls.assert_not_called()
+        assert grader.invoke.call_count == 2
 
 
 class TestVoiceMemosAgent:
