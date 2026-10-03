@@ -97,8 +97,9 @@ resource "random_password" "salt" {
   special = false
 }
 
-# envFrom target for the proxy pods: the salt key plus one env var per model
-# that declared an upstream api_key. proxy_config references them with
+# envFrom target for the proxy pods: the salt key, the Langfuse credentials
+# read by the langfuse_otel callback, plus one env var per model that declared
+# an upstream api_key. proxy_config references the latter with
 # os.environ/<NAME> so keys never land in the rendered ConfigMap.
 resource "kubernetes_secret_v1" "litellm_env" {
   metadata {
@@ -107,7 +108,12 @@ resource "kubernetes_secret_v1" "litellm_env" {
   }
 
   data = merge(
-    { LITELLM_SALT_KEY = random_password.salt.result },
+    {
+      LITELLM_SALT_KEY    = random_password.salt.result
+      LANGFUSE_HOST       = var.langfuse_host
+      LANGFUSE_PUBLIC_KEY = var.langfuse_public_key
+      LANGFUSE_SECRET_KEY = var.langfuse_secret_key
+    },
     {
       for name, m in var.models : "UPSTREAM_API_KEY_${upper(replace(name, "/[^A-Za-z0-9_]/", "_"))}" => m.api_key
       if m.api_key != ""
@@ -193,6 +199,13 @@ resource "helm_release" "litellm" {
             )
           }
         ]
+
+        # langfuse_otel exports via LiteLLM's OTLP pipeline to
+        # <LANGFUSE_HOST>/api/public/otel (Langfuse >= v3). The plain `langfuse`
+        # callback is avoided: it needs the v4 SDK, the image bundles v2.
+        litellm_settings = {
+          callbacks = ["langfuse_otel"]
+        }
 
         general_settings = {
           master_key = "os.environ/PROXY_MASTER_KEY"

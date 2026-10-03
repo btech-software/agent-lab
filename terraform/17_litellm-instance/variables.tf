@@ -59,3 +59,20 @@ variable "models" {
     error_message = "Two model names normalize to the same UPSTREAM_API_KEY_* env var; rename them so each stays distinct."
   }
 }
+
+variable "langfuse_host" {
+  description = "Base URL of the Langfuse instance (e.g. https://langfuse.my-domain.com)"
+  type        = string
+}
+
+variable "langfuse_public_key" {
+  description = "Langfuse project public key (pk-lf-...)"
+  type        = string
+  sensitive   = true
+}
+
+variable "langfuse_secret_key" {
+  description = "Langfuse project secret key (sk-lf-...)"
+  type        = string
+  sensitive   = true
+}
