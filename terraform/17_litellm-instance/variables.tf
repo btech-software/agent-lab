@@ -3,6 +3,12 @@ variable "litellm_fqdn" {
   description = "FQDN for LiteLLM access (e.g., litellm.my-domain.com)"
 }
 
+variable "trusted_proxy_cidr" {
+  type        = string
+  default     = "10.1.0.0/16"
+  description = "Pod CIDR that the ingress controller (Traefik) connects from; uvicorn trusts X-Forwarded-* headers only from it (docker-desktop default)"
+}
+
 variable "pg_image" {
   type        = string
   default     = "bsantanna/cloudnative-pg-vector:17.4"
@@ -75,4 +81,38 @@ variable "langfuse_secret_key" {
   description = "Langfuse project secret key (sk-lf-...)"
   type        = string
   sensitive   = true
+}
+
+variable "smtp_host" {
+  description = "SMTP server host used by the smtp_email callback (e.g. smtp.my-domain.com)"
+  type        = string
+}
+
+variable "smtp_port" {
+  description = "SMTP server port. 465 uses implicit TLS (SMTP_SSL); other ports connect plain and upgrade via STARTTLS when smtp_tls is true."
+  type        = number
+  default     = 465
+}
+
+variable "smtp_username" {
+  description = "SMTP authentication username"
+  type        = string
+  sensitive   = true
+}
+
+variable "smtp_password" {
+  description = "SMTP authentication password"
+  type        = string
+  sensitive   = true
+}
+
+variable "smtp_sender_email" {
+  description = "From address of LiteLLM notification emails"
+  type        = string
+}
+
+variable "smtp_tls" {
+  description = "Upgrade the connection via STARTTLS. Ignored on port 465, which is already TLS."
+  type        = bool
+  default     = true
 }

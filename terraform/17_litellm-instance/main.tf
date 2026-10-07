@@ -98,8 +98,12 @@ resource "random_password" "salt" {
 }
 
 # envFrom target for the proxy pods: the salt key, the Langfuse credentials
-# read by the langfuse_otel callback, plus one env var per model that declared
-# an upstream api_key. proxy_config references the latter with
+# read by the langfuse_otel callback, the SMTP settings read by the smtp_email
+# callback, PROXY_BASE_URL (public host used in email links such as
+# invitations; defaults to http://0.0.0.0:4000), FORWARDED_ALLOW_IPS (lets
+# uvicorn honour Traefik's X-Forwarded-Proto so redirects keep https; it
+# defaults to 127.0.0.1 only), plus one env var per model
+# that declared an upstream api_key. proxy_config references the latter with
 # os.environ/<NAME> so keys never land in the rendered ConfigMap.
 resource "kubernetes_secret_v1" "litellm_env" {
   metadata {
@@ -113,6 +117,14 @@ resource "kubernetes_secret_v1" "litellm_env" {
       LANGFUSE_HOST       = var.langfuse_host
       LANGFUSE_PUBLIC_KEY = var.langfuse_public_key
       LANGFUSE_SECRET_KEY = var.langfuse_secret_key
+      PROXY_BASE_URL      = "https://${var.litellm_fqdn}"
+      FORWARDED_ALLOW_IPS = var.trusted_proxy_cidr
+      SMTP_HOST           = var.smtp_host
+      SMTP_PORT           = tostring(var.smtp_port)
+      SMTP_USERNAME       = var.smtp_username
+      SMTP_PASSWORD       = var.smtp_password
+      SMTP_SENDER_EMAIL   = var.smtp_sender_email
+      SMTP_TLS            = var.smtp_tls ? "True" : "False"
     },
     {
       for name, m in var.models : "UPSTREAM_API_KEY_${upper(replace(name, "/[^A-Za-z0-9_]/", "_"))}" => m.api_key
@@ -137,6 +149,12 @@ resource "helm_release" "litellm" {
   values = [
     yamlencode({
       replicaCount = 1
+
+      # envFrom is only read at pod start: hashing the secret into the pod
+      # template rolls the pods whenever litellm-env changes.
+      podAnnotations = {
+        "checksum/litellm-env" = sha256(jsonencode(kubernetes_secret_v1.litellm_env.data))
+      }
 
       image = {
         repository = "ghcr.io/berriai/litellm"
@@ -203,8 +221,10 @@ resource "helm_release" "litellm" {
         # langfuse_otel exports via LiteLLM's OTLP pipeline to
         # <LANGFUSE_HOST>/api/public/otel (Langfuse >= v3). The plain `langfuse`
         # callback is avoided: it needs the v4 SDK, the image bundles v2.
+        # smtp_email sends proxy notifications (key created, budget alerts)
+        # through the SMTP_* settings in the litellm-env secret.
         litellm_settings = {
-          callbacks = ["langfuse_otel"]
+          callbacks = ["langfuse_otel", "smtp_email"]
         }
 
         general_settings = {
