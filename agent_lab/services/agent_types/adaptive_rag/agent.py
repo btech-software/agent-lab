@@ -4,30 +4,25 @@ from pathlib import Path
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.constants import START, END
-from langgraph.graph import StateGraph, MessagesState
+from langgraph.graph import StateGraph
 from langgraph.managed import RemainingSteps
-from typesafe_sdk import Noul, TypeSafeClient
-from typing_extensions import Annotated, Callable, List, Literal
+from typing_extensions import Annotated, List, Literal
 
 from agent_lab.interface.api.messages.schema import MessageRequest
 from agent_lab.services.agent_types.adaptive_rag.schema import (
-    GradeDocuments,
-    GradeAnswer,
     GenerateAnswer,
 )
 from agent_lab.services.agent_types.base import (
     join_messages,
     AgentUtils,
+    DecisionState,
     WebAgentBase,
 )
 from agent_lab.services.tasks import TaskProgress
 from agent_lab.services.agent_types.registration import discoverable_agent
 
-# minimum jev noul probability for a 'yes' decision
-JEV_DECISION_THRESHOLD = 0.5
 
-
-class AgentState(MessagesState):
+class AgentState(DecisionState):
     agent_id: str
     schema: str
     query: str
@@ -41,8 +36,6 @@ class AgentState(MessagesState):
     query_rewriter_system_prompt: str
     answer_grader_system_prompt: str
     retrieval_grader_system_prompt: str
-    decision_engine: str
-    jev_integration_id: str
 
 
 @discoverable_agent("adaptive_rag")
@@ -103,19 +96,7 @@ class AdaptiveRagAgent(WebAgentBase):
             schema=schema,
         )
 
-        # grading decisions: "llm" (default) or "jev" via a typesafe_api_v1 integration
-        self.agent_setting_service.create_agent_setting(
-            agent_id=agent_id,
-            setting_key="decision_engine",
-            setting_value="llm",
-            schema=schema,
-        )
-        self.agent_setting_service.create_agent_setting(
-            agent_id=agent_id,
-            setting_key="jev_integration_id",
-            setting_value="",
-            schema=schema,
-        )
+        self.create_decision_settings(agent_id, schema)
 
     def format_response(self, workflow_state: AgentState) -> (str, dict):
         return workflow_state.get("generation"), {
@@ -128,34 +109,6 @@ class AdaptiveRagAgent(WebAgentBase):
                 document.page_content for document in workflow_state.get("documents")
             ],
         }
-
-    def ask_jev(self, state: AgentState, jev_state: dict, instructions: str) -> bool:
-        integration = self.integration_service.get_integration_by_id(
-            state["jev_integration_id"], state["schema"]
-        )
-        api_endpoint, api_key = self.get_integration_credentials(integration)
-        with TypeSafeClient(api_key=api_key, base_url=api_endpoint) as client:
-            answers = client.system_one(
-                state=jev_state,
-                questions={"decision": Noul(instructions=instructions)},
-            ).answers
-        return answers["decision"].noul >= JEV_DECISION_THRESHOLD
-
-    def decide(
-        self,
-        state: AgentState,
-        llm_decision: Callable[[], bool],
-        jev_state: dict,
-        instructions: str,
-    ) -> bool:
-        if state.get("decision_engine") == "jev":
-            try:
-                return self.ask_jev(state, jev_state, instructions)
-            except Exception as e:
-                self.logger.warning(
-                    f"Agent[{state['agent_id']}] -> JEV decision failed, falling back to LLM -> {e}"
-                )
-        return llm_decision()
 
     def get_query_rewriter(self, chat_model, query_rewriter_system_prompt):
         re_write_prompt = ChatPromptTemplate.from_messages(
@@ -170,43 +123,18 @@ class AdaptiveRagAgent(WebAgentBase):
 
         return re_write_prompt | chat_model | StrOutputParser()
 
-    def get_answer_grader(self, llm, answer_grader_system_prompt):
-        # LLM with function call
-        structured_llm_grader = llm.with_structured_output(GradeAnswer)
-
-        answer_prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", answer_grader_system_prompt),
-                ("human", "<query>{query}</query>\n<answer>{generation}</answer>"),
-            ]
-        )
-
-        return answer_prompt | structured_llm_grader
-
     def grade_generation_v_documents_and_question(
         self, state: AgentState
     ) -> Literal["complete_answer", "incomplete_answer"]:
-        agent_id = state["agent_id"]
-        schema = state["schema"]
         query = state["query"]
-        chat_model = self.get_chat_model(agent_id, schema)
         generation = state["generation"]
         remaining_steps = state["remaining_steps"]
         answer_grader_system_prompt = state["answer_grader_system_prompt"]
         limit_remaining_steps = 10
 
-        def llm_decision() -> bool:
-            score = self.get_answer_grader(
-                chat_model, answer_grader_system_prompt
-            ).invoke({"query": query, "generation": generation})
-            return score is not None and score["binary_score"] == "yes"
-
         # Check question-answering
-        is_complete = self.decide(
-            state,
-            llm_decision,
-            jev_state={"query": query, "answer": generation},
-            instructions=answer_grader_system_prompt,
+        is_complete = self.is_yes(
+            state, answer_grader_system_prompt, {"query": query, "answer": generation}
         )
 
         if is_complete or remaining_steps <= limit_remaining_steps:
@@ -302,28 +230,10 @@ class AdaptiveRagAgent(WebAgentBase):
 
         return response
 
-    def get_retrieval_grader(self, chat_model, retrieval_grader_system_prompt):
-        # LLM with function call
-        structured_llm_grader = chat_model.with_structured_output(GradeDocuments)
-
-        grade_prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", retrieval_grader_system_prompt),
-                (
-                    "human",
-                    "<document>{document}</document>\n<query>{query}</query>",
-                ),
-            ]
-        )
-
-        return grade_prompt | structured_llm_grader
-
     def grade_documents(self, state: AgentState):
         agent_id = state["agent_id"]
-        schema = state["schema"]
         query = state["query"]
         documents = state["documents"]
-        chat_model = self.get_chat_model(agent_id, schema)
         retrieval_grader_system_prompt = state["retrieval_grader_system_prompt"]
         filtered_docs = []
         self.logger.info(f"Agent[{agent_id}] -> Document Grader -> Query -> {query} ")
@@ -335,18 +245,10 @@ class AdaptiveRagAgent(WebAgentBase):
             )
         )
         for d in documents:
-
-            def llm_decision() -> bool:
-                score = self.get_retrieval_grader(
-                    chat_model, retrieval_grader_system_prompt
-                ).invoke({"query": query, "document": d.page_content})
-                return score is not None and score["binary_score"] == "yes"
-
-            if self.decide(
+            if self.is_yes(
                 state,
-                llm_decision,
-                jev_state={"query": query, "document": d.page_content},
-                instructions=retrieval_grader_system_prompt,
+                retrieval_grader_system_prompt,
+                {"document": d.page_content, "query": query},
             ):
                 filtered_docs.append(d)
 
@@ -447,7 +349,6 @@ class AdaptiveRagAgent(WebAgentBase):
             "retrieval_grader_system_prompt": self.parse_prompt_template(
                 settings_dict, "retrieval_grader_system_prompt", template_vars
             ),
-            "decision_engine": settings_dict.get("decision_engine", "llm"),
-            "jev_integration_id": settings_dict.get("jev_integration_id", ""),
+            **self.get_decision_params(settings_dict),
             "messages": [],
         }

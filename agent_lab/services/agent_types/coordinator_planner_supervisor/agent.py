@@ -5,8 +5,8 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool, BaseTool
-from langgraph.constants import START, END
-from langgraph.graph import StateGraph, MessagesState
+from langgraph.constants import START
+from langgraph.graph import StateGraph
 from langgraph.managed import RemainingSteps
 from langgraph.prebuilt import create_react_agent, InjectedState
 from langgraph.types import Command
@@ -14,6 +14,7 @@ from typing_extensions import List, Annotated, Literal
 
 from agent_lab.interface.api.messages.schema import MessageRequest
 from agent_lab.services.agent_types.base import (
+    DecisionState,
     SupervisedWorkflowAgentBase,
     AgentUtils,
     join_messages,
@@ -22,16 +23,12 @@ from agent_lab.services.agent_types.coordinator_planner_supervisor import (
     SUPERVISED_AGENTS,
     SUPERVISED_AGENT_CONFIGURATION,
 )
-from agent_lab.services.agent_types.coordinator_planner_supervisor.schema import (
-    SupervisorRouter,
-    CoordinatorRouter,
-)
 from agent_lab.services.agent_types.schema import SolutionPlan
 from agent_lab.services.tasks import TaskProgress
 from agent_lab.services.agent_types.registration import discoverable_agent
 
 
-class AgentState(MessagesState):
+class AgentState(DecisionState):
     agent_id: str
     schema: str
     query: str
@@ -155,6 +152,11 @@ class CoordinatorPlannerSupervisorAgent(SupervisedWorkflowAgentBase):
             schema=schema,
         )
 
+        self.create_decision_settings(agent_id, schema)
+
+    def get_supervised_agents_configuration(self) -> dict:
+        return SUPERVISED_AGENT_CONFIGURATION
+
     def get_workflow_builder(self, agent_id: str):
         workflow_builder = StateGraph(AgentState)
         workflow_builder.add_edge(START, "coordinator")
@@ -211,41 +213,21 @@ class CoordinatorPlannerSupervisorAgent(SupervisedWorkflowAgentBase):
             "reporter_system_prompt": self.parse_prompt_template(
                 settings_dict, "reporter_system_prompt", template_vars
             ),
+            **self.get_decision_params(settings_dict),
             "messages": [HumanMessage(content=message_request.message_content)],
         }
 
     def get_coordinator(
         self, state: AgentState
     ) -> Command[Literal["planner", "__end__"]]:
-        agent_id = state["agent_id"]
-        schema = state["schema"]
-        query = state["query"]
-        coordinator_system_prompt = state["coordinator_system_prompt"]
+        # return annotation drives LangGraph's edge inference
+        return super().get_coordinator(state)
 
-        self.logger.info(f"Agent[{agent_id}] -> Coordinator -> Query -> {query}")
-        self.task_notification_service.publish_update(
-            task_progress=TaskProgress(
-                agent_id=agent_id,
-                status="in_progress",
-                message_content=f"Analyzing query: {query}",
-            )
-        )
-        chat_model = self.get_chat_model(agent_id, schema)
-        chat_model_with_tools = chat_model.bind_tools(self.get_coordinator_tools())
-        chat_model_with_structured_output = (
-            chat_model_with_tools.with_structured_output(CoordinatorRouter)
-        )
-        response = self.get_coordinator_chain(
-            chat_model_with_structured_output, coordinator_system_prompt
-        ).invoke({"query": query})
-        self.logger.info(f"Agent[{agent_id}] -> Coordinator -> Response -> {response}")
-        if response["next"] == END:
-            return Command(
-                goto=response["next"],
-                update={"messages": [AIMessage(content=response["generated"])]},
-            )
-        else:
-            return Command(goto=response["next"])
+    def get_supervisor(
+        self, state: AgentState
+    ) -> Command[Literal[*SUPERVISED_AGENTS, "__end__"]]:
+        # return annotation drives LangGraph's edge inference
+        return super().get_supervisor(state)
 
     def get_planner(self, state: AgentState) -> Command[Literal["supervisor"]]:
         agent_id = state["agent_id"]
@@ -300,27 +282,6 @@ class CoordinatorPlannerSupervisorAgent(SupervisedWorkflowAgentBase):
             },
             goto="supervisor",
         )
-
-    def get_supervisor(
-        self, state: AgentState
-    ) -> Command[Literal[*SUPERVISED_AGENTS, "__end__"]]:
-        agent_id = state["agent_id"]
-        schema = state["schema"]
-        messages = self.get_last_interaction_messages(state["messages"])
-        self.logger.info(f"Agent[{agent_id}] -> Supervisor -> Messages -> {messages}")
-        supervisor_system_prompt = state["supervisor_system_prompt"]
-        chat_model = self.get_chat_model(agent_id, schema).bind_tools(
-            self.get_supervisor_tools()
-        )
-        chat_model_with_structured_output = chat_model.with_structured_output(
-            SupervisorRouter
-        )
-        response = self.get_supervisor_chain(
-            llm=chat_model_with_structured_output,
-            supervisor_system_prompt=supervisor_system_prompt,
-        ).invoke({"messages": messages})
-        self.logger.info(f"Agent[{agent_id}] -> Supervisor -> Response -> {response}")
-        return Command(goto=response["next"], update={"next": response["next"]})
 
     def get_research_knowledge_base_tool(
         self, state: Annotated[dict, InjectedState]

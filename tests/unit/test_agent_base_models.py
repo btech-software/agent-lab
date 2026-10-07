@@ -8,7 +8,6 @@ from langchain_core.runnables import RunnableLambda
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_xai import ChatXAI
 from langgraph.constants import END
-from langgraph.types import Command
 from openai import OpenAI
 
 from agent_lab.domain.exceptions.base import ConfigurationError, ResourceNotFoundError
@@ -162,6 +161,170 @@ class TestGetChatModel:
 
         with pytest.raises(ConfigurationError):
             agent.get_chat_model("agent-1", "test", "some-model")
+
+
+class TestDecisionPrimitives:
+    JEV_STATE = {
+        "agent_id": "agent-1",
+        "schema": "test",
+        "decision_engine": "jev",
+        "jev_integration_id": "jev-int",
+    }
+    LLM_STATE = {"agent_id": "agent-1", "schema": "test", "decision_engine": "llm"}
+
+    def _agent(self):
+        agent = _make_agent("openai_api_v1")
+        agent.integration_service = MagicMock()
+        return agent
+
+    @staticmethod
+    def _jev_answer(client_cls, **fields):
+        client = client_cls.return_value.__enter__.return_value
+        client.system_one.return_value = MagicMock(
+            answers={"decision": MagicMock(**fields)}
+        )
+        return client
+
+    @pytest.mark.parametrize("noul, expected", [(0.5, True), (0.49, False)])
+    @patch("agent_lab.services.agent_types.base.TypeSafeClient")
+    def test_is_yes_with_jev_uses_threshold(self, client_cls, noul, expected):
+        agent = self._agent()
+        client = self._jev_answer(client_cls, noul=noul)
+
+        assert agent.is_yes(self.JEV_STATE, "grade", {"query": "q"}) is expected
+
+        agent.integration_service.get_integration_by_id.assert_called_once_with(
+            "jev-int", "test"
+        )
+        client_cls.assert_called_once_with(
+            api_key="api-key", base_url="https://example.com"
+        )
+        call = client.system_one.call_args.kwargs
+        assert call["state"] == {"query": "q"}
+        assert call["questions"]["decision"].instructions == "grade"
+
+    @patch("agent_lab.services.agent_types.base.TypeSafeClient")
+    def test_is_yes_with_llm_engine_never_calls_jev(self, client_cls):
+        agent = self._agent()
+        agent._ask_llm = MagicMock(return_value={"binary_score": "yes"})
+
+        assert agent.is_yes(self.LLM_STATE, "grade", {"query": "q"}) is True
+        client_cls.assert_not_called()
+
+    @patch("agent_lab.services.agent_types.base.TypeSafeClient")
+    def test_jev_engine_without_integration_uses_llm_silently(self, client_cls):
+        agent = self._agent()
+        agent.logger = MagicMock()
+        agent._ask_llm = MagicMock(return_value={"binary_score": "no"})
+        state = {**self.JEV_STATE, "jev_integration_id": ""}
+
+        assert agent.is_yes(state, "grade", {"query": "q"}) is False
+        client_cls.assert_not_called()
+        agent.logger.warning.assert_not_called()
+
+    @patch("agent_lab.services.agent_types.base.TypeSafeClient")
+    def test_jev_failure_falls_back_to_llm(self, client_cls):
+        agent = self._agent()
+        agent.logger = MagicMock()
+        client_cls.return_value.__enter__.return_value.system_one.side_effect = (
+            RuntimeError("jev unavailable")
+        )
+        agent._ask_llm = MagicMock(return_value={"binary_score": "yes"})
+
+        assert agent.is_yes(self.JEV_STATE, "grade", {"query": "q"}) is True
+        agent.logger.warning.assert_called_once()
+        assert "JEV decision failed" in agent.logger.warning.call_args.args[0]
+
+    def test_is_yes_llm_none_is_no(self):
+        agent = self._agent()
+        agent._ask_llm = MagicMock(return_value=None)
+
+        assert agent.is_yes(self.LLM_STATE, "grade", {"query": "q"}) is False
+
+    def test_ask_llm_renders_context_and_keeps_braces(self):
+        agent = self._agent()
+        captured = {}
+
+        def fake_model(prompt_value):
+            captured["messages"] = prompt_value.to_messages()
+            return {"binary_score": "yes"}
+
+        model = MagicMock()
+        model.with_structured_output.return_value = RunnableLambda(fake_model)
+        agent.get_chat_model = MagicMock(return_value=model)
+
+        assert agent.is_yes(
+            self.LLM_STATE,
+            'reply as {"next": "x"}',
+            {"document": "d", "query": "q"},
+        )
+        assert captured["messages"][0].content == 'reply as {"next": "x"}'
+        assert (
+            captured["messages"][1].content
+            == "<document>d</document>\n<query>q</query>"
+        )
+
+    @patch("agent_lab.services.agent_types.base.TypeSafeClient")
+    def test_choose_with_jev(self, client_cls):
+        agent = self._agent()
+        client = self._jev_answer(client_cls, choice="coder")
+        options = {"researcher": "finds facts", "coder": "runs code"}
+
+        result = agent.choose(self.JEV_STATE, "route", options, {"q": "x"}, "__end__")
+
+        assert result == "coder"
+        question = client.system_one.call_args.kwargs["questions"]["decision"]
+        assert question.criteria == options
+        assert question.instructions == "route"
+
+    def test_choose_with_llm_constrains_labels(self):
+        agent = self._agent()
+        agent._ask_llm = MagicMock(return_value={"choice": "researcher"})
+        options = {"researcher": "finds facts", "coder": "runs code"}
+
+        result = agent.choose(self.LLM_STATE, "route", options, {"q": "x"}, "__end__")
+
+        assert result == "researcher"
+        output_schema = agent._ask_llm.call_args.args[3]
+        assert output_schema["properties"]["choice"]["enum"] == ["researcher", "coder"]
+
+    @pytest.mark.parametrize("llm_output", [None, {"choice": "painter"}])
+    def test_choose_invalid_llm_label_returns_fallback(self, llm_output):
+        agent = self._agent()
+        agent.logger = MagicMock()
+        agent._ask_llm = MagicMock(return_value=llm_output)
+
+        result = agent.choose(
+            self.LLM_STATE, "route", {"researcher": "finds facts"}, {}, "__end__"
+        )
+
+        assert result == "__end__"
+        agent.logger.warning.assert_called_once()
+
+    def test_get_decision_params_defaults(self):
+        agent = self._agent()
+
+        assert agent.get_decision_params({}) == {
+            "decision_engine": "llm",
+            "jev_integration_id": "",
+        }
+        assert agent.get_decision_params(
+            {"decision_engine": "jev", "jev_integration_id": "i"}
+        ) == {"decision_engine": "jev", "jev_integration_id": "i"}
+
+    def test_create_decision_settings(self):
+        agent = self._agent()
+        agent.agent_setting_service = MagicMock()
+
+        agent.create_decision_settings("agent-1", "test")
+
+        calls = agent.agent_setting_service.create_agent_setting.call_args_list
+        assert [c.kwargs["setting_key"] for c in calls] == [
+            "decision_engine",
+            "jev_integration_id",
+        ]
+        assert calls[0].kwargs["setting_value"] == "llm"
+        assert calls[1].kwargs["setting_value"] == ""
 
 
 class TestJoinMessages:
@@ -571,18 +734,8 @@ class TestSupervisedWorkflowChains:
         agent = self._agent()
 
         assert agent.get_coordinator_tools() == []
-        assert agent.get_supervisor_tools() == []
         assert agent.get_reporter_tools() == []
         assert len(agent.get_planner_tools()) == 2
-
-    def test_get_coordinator_chain(self):
-        llm = RunnableLambda(lambda _: AIMessage(content="routed"))
-
-        result = (
-            self._agent().get_coordinator_chain(llm, "system").invoke({"query": "q"})
-        )
-
-        assert result.content == "routed"
 
     def test_get_planner_chain_without_search_results(self):
         llm = RunnableLambda(lambda _: AIMessage(content="plan"))
@@ -598,17 +751,6 @@ class TestSupervisedWorkflowChains:
         result = chain.invoke({"query": "q", "search_results": "found"})
 
         assert result.content == "plan"
-
-    def test_get_supervisor_chain(self):
-        llm = RunnableLambda(lambda _: AIMessage(content="next"))
-
-        result = (
-            self._agent()
-            .get_supervisor_chain(llm, "system")
-            .invoke({"messages": "history"})
-        )
-
-        assert result.content == "next"
 
 
 class TestCoordinatorPlannerSupervisorAgent:
@@ -650,7 +792,7 @@ class TestCoordinatorPlannerSupervisorAgent:
 
         agent.create_default_settings("agent-1", "test")
 
-        assert agent.agent_setting_service.create_agent_setting.call_count == 9
+        assert agent.agent_setting_service.create_agent_setting.call_count == 11
 
     def test_get_workflow_builder(self):
         builder = self._agent().get_workflow_builder("agent-1")
@@ -664,6 +806,9 @@ class TestCoordinatorPlannerSupervisorAgent:
             "browser",
             "reporter",
         } <= set(builder.nodes.keys())
+        edges = [(e.source, e.target) for e in builder.compile().get_graph().edges]
+        assert ("coordinator", "planner") in edges
+        assert ("supervisor", "researcher") in edges
 
     @pytest.mark.parametrize("deep_search", ["True", "False"])
     def test_get_input_params(self, deep_search):
@@ -685,29 +830,37 @@ class TestCoordinatorPlannerSupervisorAgent:
         assert params["deep_search_mode"] is (deep_search == "True")
         assert params["collection_name"] == "kb"
         assert params["coordinator_system_prompt"] == "coordinator"
+        # agents created before the decision settings existed default to jev
+        assert params["decision_engine"] == "jev"
+        assert params["jev_integration_id"] == ""
 
-    def test_get_coordinator_ends_conversation(self):
+    def test_get_coordinator_accepts_to_planner(self):
         agent = self._agent()
+        agent.is_yes = MagicMock(return_value=True)
         agent.get_chat_model = MagicMock()
-        chain = MagicMock()
-        chain.invoke.return_value = {"next": END, "generated": "hello"}
-        agent.get_coordinator_chain = MagicMock(return_value=chain)
-
-        command = agent.get_coordinator(self._state())
-
-        assert command.goto == END
-        assert command.update["messages"][0].content == "hello"
-
-    def test_get_coordinator_routes_to_planner(self):
-        agent = self._agent()
-        agent.get_chat_model = MagicMock()
-        chain = MagicMock()
-        chain.invoke.return_value = {"next": "planner"}
-        agent.get_coordinator_chain = MagicMock(return_value=chain)
 
         command = agent.get_coordinator(self._state())
 
         assert command.goto == "planner"
+        agent.get_chat_model.assert_not_called()
+        instructions = agent.is_yes.call_args.args[1]
+        assert instructions.startswith("coordinator")
+        assert agent.COORDINATOR_QUESTION in instructions
+        assert agent.is_yes.call_args.args[2] == {"query": "what?"}
+
+    def test_get_coordinator_denies_with_llm_reply(self):
+        agent = self._agent()
+        agent.is_yes = MagicMock(return_value=False)
+        agent.get_chat_model = MagicMock(
+            return_value=RunnableLambda(lambda _: AIMessage(content="Hello there!"))
+        )
+
+        command = agent.get_coordinator(self._state())
+
+        assert command.goto == END
+        reply = command.update["messages"][0]
+        assert reply.content == "Hello there!"
+        assert reply.name == "coordinator"
 
     def test_get_planner(self):
         agent = self._agent()
@@ -736,17 +889,81 @@ class TestCoordinatorPlannerSupervisorAgent:
         assert command.goto == "supervisor"
         assert agent.get_planner_chain.call_args.kwargs["search_results"] is not None
 
-    def test_get_supervisor(self):
+    def test_get_supervisor_ends_when_complete(self):
         agent = self._agent()
-        agent.get_chat_model = MagicMock()
-        chain = MagicMock()
-        chain.invoke.return_value = {"next": "researcher"}
-        agent.get_supervisor_chain = MagicMock(return_value=chain)
+        agent.is_yes = MagicMock(return_value=True)
+        agent.choose = MagicMock()
+
+        command = agent.get_supervisor(self._state())
+
+        assert command.goto == END
+        assert command.update == {"next": END}
+        agent.choose.assert_not_called()
+        instructions, context = agent.is_yes.call_args.args[1:]
+        assert agent.COMPLETION_QUESTION in instructions
+        assert set(context) == {"query", "execution_plan", "latest_work"}
+
+    def test_get_supervisor_routes_when_incomplete(self):
+        agent = self._agent()
+        agent.is_yes = MagicMock(return_value=False)
+        agent.choose = MagicMock(return_value="researcher")
 
         command = agent.get_supervisor(self._state())
 
         assert command.goto == "researcher"
         assert command.update == {"next": "researcher"}
+        _, instructions, options, _ = agent.choose.call_args.args
+        assert agent.ROUTING_QUESTION in instructions
+        assert list(options) == ["researcher", "coder", "browser", "reporter"]
+        assert agent.choose.call_args.kwargs["fallback"] == END
+
+    def test_get_supervisor_stringifies_list_content(self):
+        agent = self._agent()
+        agent.is_yes = MagicMock(return_value=True)
+        state = self._state(
+            messages=[
+                HumanMessage(content="what?"),
+                AIMessage(content=[{"type": "text", "text": "partial"}]),
+            ]
+        )
+
+        agent.get_supervisor(state)
+
+        assert "partial" in agent.is_yes.call_args.args[2]["latest_work"]
+
+    def test_get_supervisor_ends_when_step_budget_exhausted(self):
+        agent = self._agent()
+        agent.is_yes = MagicMock()
+        agent.choose = MagicMock()
+
+        command = agent.get_supervisor(self._state(remaining_steps=2))
+
+        assert command.goto == END
+        assert command.update == {"next": END}
+        agent.is_yes.assert_not_called()
+        agent.choose.assert_not_called()
+
+    def test_get_supervisor_normal_path_above_step_reserve(self):
+        agent = self._agent()
+        agent.is_yes = MagicMock(return_value=True)
+
+        command = agent.get_supervisor(self._state(remaining_steps=3))
+
+        assert command.goto == END
+        agent.is_yes.assert_called_once()
+
+    def test_get_coordinator_context_default(self):
+        assert self._agent().get_coordinator_context(self._state()) == {
+            "query": "what?"
+        }
+
+    def test_base_supervisor_requires_team_configuration(self):
+        from agent_lab.services.agent_types.base import SupervisedWorkflowAgentBase
+
+        with pytest.raises(NotImplementedError):
+            SupervisedWorkflowAgentBase.get_supervised_agents_configuration(
+                self._agent()
+            )
 
     def test_get_research_knowledge_base_tool(self):
         agent = self._agent()
@@ -903,20 +1120,6 @@ class TestAdaptiveRagAgent:
 
         assert result == "better query"
 
-    def test_get_answer_grader(self):
-        llm = MagicMock()
-        llm.with_structured_output.return_value = RunnableLambda(
-            lambda _: {"binary_score": "yes"}
-        )
-
-        result = (
-            self._agent()
-            .get_answer_grader(llm, "system")
-            .invoke({"query": "q", "generation": "g"})
-        )
-
-        assert result == {"binary_score": "yes"}
-
     def test_get_rag_chain(self):
         llm = MagicMock()
         llm.with_structured_output.return_value = RunnableLambda(
@@ -931,53 +1134,27 @@ class TestAdaptiveRagAgent:
 
         assert result["generation"] == "g"
 
-    def test_get_retrieval_grader(self):
-        llm = MagicMock()
-        llm.with_structured_output.return_value = RunnableLambda(
-            lambda _: {"binary_score": "no"}
-        )
-
-        result = (
-            self._agent()
-            .get_retrieval_grader(llm, "system")
-            .invoke({"query": "q", "document": "d"})
-        )
-
-        assert result == {"binary_score": "no"}
-
-    def test_grade_generation_complete_on_yes(self):
+    @pytest.mark.parametrize(
+        "is_yes, remaining_steps, expected",
+        [
+            (True, 25, "complete_answer"),
+            (False, 25, "incomplete_answer"),
+            (False, 5, "complete_answer"),
+        ],
+    )
+    def test_grade_generation(self, is_yes, remaining_steps, expected):
         agent = self._agent()
-        grader = MagicMock()
-        grader.invoke.return_value = {"binary_score": "yes"}
-        agent.get_answer_grader = MagicMock(return_value=grader)
+        agent.is_yes = MagicMock(return_value=is_yes)
 
-        assert (
-            agent.grade_generation_v_documents_and_question(self._state())
-            == "complete_answer"
+        result = agent.grade_generation_v_documents_and_question(
+            self._state(remaining_steps=remaining_steps)
         )
 
-    def test_grade_generation_incomplete(self):
-        agent = self._agent()
-        grader = MagicMock()
-        grader.invoke.return_value = {"binary_score": "no"}
-        agent.get_answer_grader = MagicMock(return_value=grader)
-
-        assert (
-            agent.grade_generation_v_documents_and_question(self._state())
-            == "incomplete_answer"
-        )
-
-    def test_grade_generation_completes_when_steps_exhausted(self):
-        agent = self._agent()
-        grader = MagicMock()
-        grader.invoke.return_value = None
-        agent.get_answer_grader = MagicMock(return_value=grader)
-
-        assert (
-            agent.grade_generation_v_documents_and_question(
-                self._state(remaining_steps=5)
-            )
-            == "complete_answer"
+        assert result == expected
+        agent.is_yes.assert_called_once_with(
+            agent.is_yes.call_args.args[0],
+            "grade",
+            {"query": "what?", "answer": "an answer"},
         )
 
     def test_get_workflow_builder(self):
@@ -1013,14 +1190,16 @@ class TestAdaptiveRagAgent:
 
     def test_grade_documents_filters(self):
         agent = self._agent()
-        grader = MagicMock()
-        grader.invoke.side_effect = [{"binary_score": "yes"}, {"binary_score": "no"}]
-        agent.get_retrieval_grader = MagicMock(return_value=grader)
+        agent.is_yes = MagicMock(side_effect=[True, False])
         documents = [MagicMock(page_content="d1"), MagicMock(page_content="d2")]
 
         result = agent.grade_documents(self._state(documents=documents))
 
         assert result["documents"] == [documents[0]]
+        assert agent.is_yes.call_args_list[0].args[1:] == (
+            "grade docs",
+            {"document": "d1", "query": "what?"},
+        )
 
     def test_retrieve(self):
         agent = self._agent()
@@ -1101,10 +1280,10 @@ class TestAdaptiveRagAgent:
         ]
         return client
 
-    @patch("agent_lab.services.agent_types.adaptive_rag.agent.TypeSafeClient")
+    @patch("agent_lab.services.agent_types.base.TypeSafeClient")
     def test_grade_documents_with_jev(self, client_cls):
         agent = self._jev_agent()
-        agent.get_retrieval_grader = MagicMock()
+        agent._ask_llm = MagicMock()
         client = self._jev_answers(client_cls, 0.9, 0.5, 0.2)
         documents = [MagicMock(page_content=f"d{i}") for i in range(3)]
 
@@ -1112,7 +1291,7 @@ class TestAdaptiveRagAgent:
 
         # 0.5 sits on the threshold and is kept
         assert result["documents"] == documents[:2]
-        agent.get_retrieval_grader.assert_not_called()
+        agent._ask_llm.assert_not_called()
         agent.integration_service.get_integration_by_id.assert_called_with(
             "jev-int", "test"
         )
@@ -1126,47 +1305,43 @@ class TestAdaptiveRagAgent:
     @pytest.mark.parametrize(
         "noul, expected", [(0.8, "complete_answer"), (0.3, "incomplete_answer")]
     )
-    @patch("agent_lab.services.agent_types.adaptive_rag.agent.TypeSafeClient")
+    @patch("agent_lab.services.agent_types.base.TypeSafeClient")
     def test_grade_generation_with_jev(self, client_cls, noul, expected):
         agent = self._jev_agent()
-        agent.get_answer_grader = MagicMock()
+        agent._ask_llm = MagicMock()
         client = self._jev_answers(client_cls, noul)
 
         result = agent.grade_generation_v_documents_and_question(self._jev_state())
 
         assert result == expected
-        agent.get_answer_grader.assert_not_called()
+        agent._ask_llm.assert_not_called()
         call = client.system_one.call_args.kwargs
         assert call["state"] == {"query": "what?", "answer": "an answer"}
         assert call["questions"]["decision"].instructions == "grade"
 
-    @patch("agent_lab.services.agent_types.adaptive_rag.agent.TypeSafeClient")
+    @patch("agent_lab.services.agent_types.base.TypeSafeClient")
     def test_jev_failure_falls_back_to_llm(self, client_cls):
         agent = self._jev_agent()
         client_cls.return_value.__enter__.return_value.system_one.side_effect = (
             RuntimeError("jev unavailable")
         )
-        grader = MagicMock()
-        grader.invoke.return_value = {"binary_score": "yes"}
-        agent.get_answer_grader = MagicMock(return_value=grader)
+        agent._ask_llm = MagicMock(return_value={"binary_score": "yes"})
 
         result = agent.grade_generation_v_documents_and_question(self._jev_state())
 
         assert result == "complete_answer"
-        grader.invoke.assert_called_once()
+        agent._ask_llm.assert_called_once()
 
-    @patch("agent_lab.services.agent_types.adaptive_rag.agent.TypeSafeClient")
+    @patch("agent_lab.services.agent_types.base.TypeSafeClient")
     def test_llm_engine_never_calls_jev(self, client_cls):
         agent = self._jev_agent()
-        grader = MagicMock()
-        grader.invoke.return_value = {"binary_score": "yes"}
-        agent.get_retrieval_grader = MagicMock(return_value=grader)
+        agent._ask_llm = MagicMock(return_value={"binary_score": "yes"})
 
         agent.grade_documents(self._state(decision_engine="llm"))
         agent.grade_documents(self._state())  # no decision_engine in state
 
         client_cls.assert_not_called()
-        assert grader.invoke.call_count == 2
+        assert agent._ask_llm.call_count == 2
 
 
 class TestVoiceMemosAgent:
@@ -1213,6 +1388,8 @@ class TestVoiceMemosAgent:
             "reporter",
             "content_analyst",
         } <= set(builder.nodes.keys())
+        edges = [(e.source, e.target) for e in builder.compile().get_graph().edges]
+        assert ("supervisor", "content_analyst") in edges
 
     def test_create_default_settings(self):
         agent = self._agent()
@@ -1220,7 +1397,7 @@ class TestVoiceMemosAgent:
 
         agent.create_default_settings("agent-1", "test")
 
-        assert agent.agent_setting_service.create_agent_setting.call_count == 7
+        assert agent.agent_setting_service.create_agent_setting.call_count == 9
 
     def _settings(self):
         return [
@@ -1242,6 +1419,50 @@ class TestVoiceMemosAgent:
         assert params["attachment_id"] == "att-1"
         assert params["audio_format"] == "mp3"
         assert params["structured_report"] is None
+        assert params["decision_engine"] == "jev"
+
+    def test_get_coordinator_context_includes_prior_conversation(self):
+        state = self._state(
+            messages=[
+                HumanMessage(content="first"),
+                AIMessage(content="Transcription: 'x'"),
+                HumanMessage(content="follow up"),
+            ],
+            query="follow up",
+        )
+
+        context = self._agent().get_coordinator_context(state)
+
+        assert context["query"] == "follow up"
+        assert "Transcription: 'x'" in context["conversation"]
+        assert "follow up" not in context["conversation"]
+
+    def test_get_coordinator_context_omits_conversation_without_history(self):
+        context = self._agent().get_coordinator_context(self._state())
+
+        assert context == {"query": "summarize"}
+
+    @patch(
+        "agent_lab.services.agent_types.business.voice_memos.agent.create_react_agent"
+    )
+    def test_get_coordinator_gate_receives_conversation(self, create_react_agent_mock):
+        agent = self._agent()
+        agent.is_yes = MagicMock(return_value=True)
+        create_react_agent_mock.return_value.invoke.return_value = {
+            "messages": [AIMessage(content="direct reply")]
+        }
+        state = self._state(
+            messages=[
+                HumanMessage(content="first"),
+                AIMessage(content="Transcription: 'x'"),
+                HumanMessage(content="follow up"),
+            ],
+            query="follow up",
+        )
+
+        agent.get_coordinator(state)
+
+        assert "conversation" in agent.is_yes.call_args.args[2]
 
     def test_get_coordinator_tools(self):
         assert len(self._agent().get_coordinator_tools()) == 2
@@ -1252,8 +1473,9 @@ class TestVoiceMemosAgent:
     @patch(
         "agent_lab.services.agent_types.business.voice_memos.agent.create_react_agent"
     )
-    def test_get_coordinator_without_attachment(self, create_react_agent_mock):
+    def test_get_coordinator_without_attachment_accepted(self, create_react_agent_mock):
         agent = self._agent()
+        agent.is_yes = MagicMock(return_value=True)
         create_react_agent_mock.return_value.invoke.return_value = {
             "messages": [AIMessage(content="direct reply")]
         }
@@ -1262,6 +1484,23 @@ class TestVoiceMemosAgent:
 
         assert command.goto == END
         assert command.update["messages"][0].content == "direct reply"
+        agent.is_yes.assert_called_once()
+
+    @patch(
+        "agent_lab.services.agent_types.business.voice_memos.agent.create_react_agent"
+    )
+    def test_get_coordinator_without_attachment_denied(self, create_react_agent_mock):
+        agent = self._agent()
+        agent.is_yes = MagicMock(return_value=False)
+        agent.get_chat_model = MagicMock(
+            return_value=RunnableLambda(lambda _: AIMessage(content="Hi!"))
+        )
+
+        command = agent.get_coordinator(self._state())
+
+        assert command.goto == END
+        assert command.update["messages"][0].content == "Hi!"
+        create_react_agent_mock.assert_not_called()
 
     def test_get_coordinator_with_audio_attachment(self):
         agent = self._agent()
@@ -1273,11 +1512,13 @@ class TestVoiceMemosAgent:
         completion.choices = [MagicMock(message=MagicMock(content="the transcript"))]
         openai_client.chat.completions.create.return_value = completion
         agent.get_openai_client = MagicMock(return_value=openai_client)
+        agent.is_yes = MagicMock()
 
         command = agent.get_coordinator(self._state(attachment_id="att-1"))
 
         assert command.goto == "planner"
         assert command.update["transcription"] == "the transcript"
+        agent.is_yes.assert_not_called()
 
     def test_get_planner(self):
         agent = self._agent()
@@ -1291,20 +1532,24 @@ class TestVoiceMemosAgent:
 
     def test_get_supervisor_routes(self):
         agent = self._agent()
-        chain = MagicMock()
-        chain.invoke.return_value = {"next": "content_analyst"}
-        agent.get_supervisor_chain = MagicMock(return_value=chain)
+        agent.is_yes = MagicMock(return_value=False)
+        agent.choose = MagicMock(return_value="content_analyst")
 
         command = agent.get_supervisor(self._state())
 
         assert command.goto == "content_analyst"
+        assert list(agent.choose.call_args.args[2]) == ["content_analyst", "reporter"]
 
     def test_get_supervisor_ends_when_report_ready(self):
-        command = self._agent().get_supervisor(
+        agent = self._agent()
+        agent.is_yes = MagicMock()
+
+        command = agent.get_supervisor(
             self._state(structured_report={"main_topic": "t"})
         )
 
         assert command.goto == "__end__"
+        agent.is_yes.assert_not_called()
 
     def test_get_reporter_chain(self):
         agent = self._agent()
@@ -1392,26 +1637,57 @@ class TestFastVoiceMemosAgent:
 
         assert params["attachment_id"] == "att-1"
         assert "planner_system_prompt" not in params
+        assert params["decision_engine"] == "jev"
 
     def test_get_workflow_builder(self):
         builder = self._agent().get_workflow_builder("agent-1")
 
         assert set(builder.nodes.keys()) == {"coordinator", "content_analyst"}
+        builder.compile()
 
-    def test_get_coordinator_remaps_goto(self):
+    def test_audio_is_handed_to_content_analyst(self):
         agent = self._agent()
-        original = Command(goto="planner", update={"transcription": "t"})
-        with patch.object(VoiceMemosAgent, "get_coordinator", return_value=original):
-            command = agent.get_coordinator({"agent_id": "agent-1"})
+        attachment = MagicMock()
+        attachment.raw_content = b"audio-bytes"
+        agent.attachment_service.get_attachment_by_id.return_value = attachment
+        openai_client = MagicMock()
+        completion = MagicMock()
+        completion.choices = [MagicMock(message=MagicMock(content="the transcript"))]
+        openai_client.chat.completions.create.return_value = completion
+        agent.get_openai_client = MagicMock(return_value=openai_client)
+        state = {
+            "agent_id": "agent-1",
+            "schema": "test",
+            "attachment_id": "att-1",
+            "audio_format": "mp3",
+            "audio_language_model": "gpt-4o-audio",
+            "query": "summarize",
+            "coordinator_system_prompt": "coordinator",
+            "messages": [HumanMessage(content="summarize")],
+        }
 
+        command = agent.get_coordinator(state)
+
+        assert agent.coordinator_accept_node == "content_analyst"
         assert command.goto == "content_analyst"
-        assert command.update == {"transcription": "t"}
+        assert command.update["transcription"] == "the transcript"
 
-    def test_get_coordinator_preserves_end(self):
+    def test_denied_text_request_ends(self):
         agent = self._agent()
-        original = Command(goto=END, update={"messages": []})
-        with patch.object(VoiceMemosAgent, "get_coordinator", return_value=original):
-            command = agent.get_coordinator({"agent_id": "agent-1"})
+        agent.is_yes = MagicMock(return_value=False)
+        agent.get_chat_model = MagicMock(
+            return_value=RunnableLambda(lambda _: AIMessage(content="Hi!"))
+        )
+        state = {
+            "agent_id": "agent-1",
+            "schema": "test",
+            "attachment_id": None,
+            "query": "hello",
+            "coordinator_system_prompt": "coordinator",
+            "messages": [HumanMessage(content="hello")],
+        }
+
+        command = agent.get_coordinator(state)
 
         assert command.goto == "__end__"
 
