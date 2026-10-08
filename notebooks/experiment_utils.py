@@ -13,7 +13,7 @@ DEFAULT_AGENT_LAB_ENDPOINT = "http://localhost:18000"
 REQUEST_TIMEOUT_SECONDS = 300
 
 # embeddings model served by the local openai-compatible server (e.g. ollama)
-DEFAULT_EMBEDDINGS_TAG = "bge-m3"
+DEFAULT_EMBEDDINGS_TAG = "embeddinggemma-2"
 DEFAULT_RAG_COLLECTION = "static_document_data_ollama_embeddings"
 RAG_AGENT_TYPES = {"adaptive_rag", "react_rag", "coordinator_planner_supervisor"}
 
