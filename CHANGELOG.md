@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.17.1 (2026-10-08)
+
+### Bug Fixes
+
+- Actions pypi relase ([#393](https://github.com/btech-software/agent-lab/pull/393),
+  [`eaa2b10`](https://github.com/btech-software/agent-lab/commit/eaa2b10faf659f329d4c1c20bc921963de8a489f))
+
+
 ## v1.17.0 (2026-10-08)
 
 ### Features
