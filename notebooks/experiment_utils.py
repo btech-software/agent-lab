@@ -10,6 +10,12 @@ from agent_lab.core.container import Container
 from agent_lab.services.agent_types import discovery
 
 DEFAULT_AGENT_LAB_ENDPOINT = "http://localhost:18000"
+REQUEST_TIMEOUT_SECONDS = 300
+
+# embeddings model served by the local openai-compatible server (e.g. ollama)
+DEFAULT_EMBEDDINGS_TAG = "embeddinggemma-2"
+DEFAULT_RAG_COLLECTION = "static_document_data_ollama_embeddings"
+RAG_AGENT_TYPES = {"adaptive_rag", "react_rag", "coordinator_planner_supervisor"}
 
 
 def bootstrap_container(modules, scan_packages=DEFAULT_SCAN_PACKAGES):
@@ -35,51 +41,49 @@ def print_graph(graph):
     )
 
 
+def _post(path: str, agent_lab_endpoint: str, **kwargs) -> dict:
+    response = requests.post(
+        f"{agent_lab_endpoint}{path}",
+        headers={"Authorization": f"Bearer {os.getenv('ACCESS_TOKEN', 'x')}"},
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        **kwargs,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def create_llm_with_integration(
     llm_tag: str,
     integration_params: dict,
     agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
-    embeddings_tag: str = None,
-):
+    embeddings_tag: str | None = None,
+) -> dict:
     # pin embeddings to the model served by EMBEDDINGS_ENDPOINT (openai_api_v1
     # integrations default to text-embedding-3-large, which Ollama lacks)
     if embeddings_tag is None and os.getenv("EMBEDDINGS_ENDPOINT"):
-        embeddings_tag = "bge-m3"
+        embeddings_tag = DEFAULT_EMBEDDINGS_TAG
 
-    integration_response = requests.post(
-        f"{agent_lab_endpoint}/integrations/create",
-        json=integration_params,
-        headers={"Authorization": f"Bearer {os.getenv('ACCESS_TOKEN', 'x')}"},
+    integration = _post(
+        "/integrations/create", agent_lab_endpoint, json=integration_params
     )
-    integration_response.raise_for_status()
-    integration_result = integration_response.json()
-
-    llm_params = {
-        "integration_id": integration_result["id"],
-        "language_model_tag": llm_tag,
-    }
-
-    llm_response = requests.post(
-        f"{agent_lab_endpoint}/llms/create",
-        json=llm_params,
-        headers={"Authorization": f"Bearer {os.getenv('ACCESS_TOKEN', 'x')}"},
+    llm = _post(
+        "/llms/create",
+        agent_lab_endpoint,
+        json={"integration_id": integration["id"], "language_model_tag": llm_tag},
     )
-    llm_response.raise_for_status()
-    llm_result = llm_response.json()
 
     if embeddings_tag is not None:
-        update_response = requests.post(
-            f"{agent_lab_endpoint}/llms/update_setting",
+        _post(
+            "/llms/update_setting",
+            agent_lab_endpoint,
             json={
-                "language_model_id": llm_result["id"],
+                "language_model_id": llm["id"],
                 "setting_key": "embeddings",
                 "setting_value": embeddings_tag,
             },
-            headers={"Authorization": f"Bearer {os.getenv('ACCESS_TOKEN', 'x')}"},
         )
-        update_response.raise_for_status()
 
-    return llm_result
+    return llm
 
 
 def create_agent_with_integration(
@@ -87,44 +91,54 @@ def create_agent_with_integration(
     agent_type: str,
     integration_params: dict,
     agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
-    embeddings_tag: str = None,
-    rag_collection: str = None,
-):
-    llm_result = create_llm_with_integration(
+    embeddings_tag: str | None = None,
+    rag_collection: str = DEFAULT_RAG_COLLECTION,
+) -> dict:
+    llm = create_llm_with_integration(
         llm_tag=llm_tag,
         integration_params=integration_params,
         agent_lab_endpoint=agent_lab_endpoint,
         embeddings_tag=embeddings_tag,
     )
-
-    agent_params = {
-        "agent_name": f"agent_{uuid4()}",
-        "agent_type": agent_type,
-        "language_model_id": llm_result["id"],
-    }
-
-    agent_response = requests.post(
-        f"{agent_lab_endpoint}/agents/create",
-        json=agent_params,
-        headers={"Authorization": f"Bearer {os.getenv('ACCESS_TOKEN', 'x')}"},
+    agent = _post(
+        "/agents/create",
+        agent_lab_endpoint,
+        json={
+            "agent_name": f"agent_{uuid4()}",
+            "agent_type": agent_type,
+            "language_model_id": llm["id"],
+        },
     )
-    agent_response.raise_for_status()
-    agent_result = agent_response.json()
 
-    rag_agent_types = ["adaptive_rag", "react_rag", "coordinator_planner_supervisor"]
-    if agent_type in rag_agent_types:
-        if rag_collection is not None:
-            collection = rag_collection
-        else:
-            collection = "static_document_data_ollama_embeddings"
+    if agent_type in RAG_AGENT_TYPES:
         update_agent_setting(
-            agent_id=agent_result["id"],
+            agent_id=agent["id"],
             setting_key="collection_name",
-            setting_value=collection,
+            setting_value=rag_collection,
             agent_lab_endpoint=agent_lab_endpoint,
         )
 
-    return agent_result
+    return agent
+
+
+def _create_hosted_agent(
+    integration_type: str,
+    api_endpoint: str,
+    llm_tag: str,
+    agent_type: str,
+    agent_lab_endpoint: str,
+    api_key: str,
+) -> dict:
+    return create_agent_with_integration(
+        llm_tag,
+        agent_type,
+        {
+            "integration_type": integration_type,
+            "api_endpoint": api_endpoint,
+            "api_key": api_key,
+        },
+        agent_lab_endpoint,
+    )
 
 
 def create_local_agent(
@@ -132,21 +146,18 @@ def create_local_agent(
     agent_type: str = "test_echo",
     agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
     local_endpoint: str = "http://localhost:11434/v1",
-) -> str:
+) -> dict:
     # local openai-compatible server (e.g. ollama) mocking the openai api
-    integration_params = {
-        "integration_type": "openai_api_v1",
-        "api_endpoint": local_endpoint,
-        "api_key": "ollama",
-    }
-
     return create_agent_with_integration(
         llm_tag,
         agent_type,
-        integration_params,
+        {
+            "integration_type": "openai_api_v1",
+            "api_endpoint": local_endpoint,
+            "api_key": "ollama",
+        },
         agent_lab_endpoint,
-        embeddings_tag="bge-m3",
-        rag_collection="static_document_data_ollama_embeddings",
+        embeddings_tag=DEFAULT_EMBEDDINGS_TAG,
     )
 
 
@@ -155,18 +166,14 @@ def create_openai_agent(
     agent_type: str = "test_echo",
     agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
     api_key: str = "",
-) -> str:
-    integration_params = {
-        "integration_type": "openai_api_v1",
-        "api_endpoint": "https://api.openai.com/v1/",
-        "api_key": api_key,
-    }
-
-    return create_agent_with_integration(
+) -> dict:
+    return _create_hosted_agent(
+        "openai_api_v1",
+        "https://api.openai.com/v1/",
         llm_tag,
         agent_type,
-        integration_params,
         agent_lab_endpoint,
+        api_key,
     )
 
 
@@ -175,18 +182,14 @@ def create_xai_agent(
     agent_type: str = "test_echo",
     agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
     api_key: str = "",
-) -> str:
-    integration_params = {
-        "integration_type": "xai_api_v1",
-        "api_endpoint": "https://api.x.ai/v1/",
-        "api_key": api_key,
-    }
-
-    return create_agent_with_integration(
+) -> dict:
+    return _create_hosted_agent(
+        "xai_api_v1",
+        "https://api.x.ai/v1/",
         llm_tag,
         agent_type,
-        integration_params,
         agent_lab_endpoint,
+        api_key,
     )
 
 
@@ -195,18 +198,14 @@ def create_anthropic_agent(
     agent_type: str = "test_echo",
     agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
     api_key: str = "",
-) -> str:
-    integration_params = {
-        "integration_type": "anthropic_api_v1",
-        "api_endpoint": "https://api.anthropic.com",
-        "api_key": api_key,
-    }
-
-    return create_agent_with_integration(
+) -> dict:
+    return _create_hosted_agent(
+        "anthropic_api_v1",
+        "https://api.anthropic.com",
         llm_tag,
         agent_type,
-        integration_params,
         agent_lab_endpoint,
+        api_key,
     )
 
 
@@ -216,12 +215,12 @@ def create_attachment(
     agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
 ) -> str:
     with open(file_path, "rb") as file:
-        attachment_response = requests.post(
-            f"{agent_lab_endpoint}/attachments/upload",
+        attachment = _post(
+            "/attachments/upload",
+            agent_lab_endpoint,
             files={"file": (file_path, file, content_type)},
-            headers={"Authorization": f"Bearer {os.getenv('ACCESS_TOKEN', 'x')}"},
         )
-        return attachment_response.json()["id"]
+    return attachment["id"]
 
 
 def create_embeddings(
@@ -230,16 +229,15 @@ def create_embeddings(
     collection_name: str,
     agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
 ) -> dict:
-    embeddings_response = requests.post(
-        f"{agent_lab_endpoint}/attachments/embeddings",
+    return _post(
+        "/attachments/embeddings",
+        agent_lab_endpoint,
         json={
             "attachment_id": attachment_id,
             "language_model_id": language_model_id,
             "collection_name": collection_name,
         },
-        headers={"Authorization": f"Bearer {os.getenv('ACCESS_TOKEN', 'x')}"},
     )
-    return embeddings_response.json()
 
 
 def update_agent_setting(
@@ -248,24 +246,66 @@ def update_agent_setting(
     setting_value: str,
     agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
 ) -> dict:
-    update_setting_response = requests.post(
-        f"{agent_lab_endpoint}/agents/update_setting",
+    return _post(
+        "/agents/update_setting",
+        agent_lab_endpoint,
         json={
             "agent_id": agent_id,
             "setting_key": setting_key,
             "setting_value": setting_value,
         },
-        headers={"Authorization": f"Bearer {os.getenv('ACCESS_TOKEN', 'x')}"},
     )
-    return update_setting_response.json()
+
+
+def update_language_model_setting(
+    language_model_id: str,
+    setting_key: str,
+    setting_value: str,
+    agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
+) -> dict:
+    return _post(
+        "/llms/update_setting",
+        agent_lab_endpoint,
+        json={
+            "language_model_id": language_model_id,
+            "setting_key": setting_key,
+            "setting_value": setting_value,
+        },
+    )
+
+
+def enable_jev(
+    agent_id: str,
+    api_key: str,
+    api_endpoint: str = "https://api.typesafe.ai",
+    agent_lab_endpoint: str = DEFAULT_AGENT_LAB_ENDPOINT,
+) -> dict:
+    # route the agent's grading decisions through a typesafe_api_v1 integration
+    integration = _post(
+        "/integrations/create",
+        agent_lab_endpoint,
+        json={
+            "integration_type": "typesafe_api_v1",
+            "api_endpoint": api_endpoint,
+            "api_key": api_key,
+        },
+    )
+    update_agent_setting(agent_id, "decision_engine", "jev", agent_lab_endpoint)
+    update_agent_setting(
+        agent_id, "jev_integration_id", integration["id"], agent_lab_endpoint
+    )
+    return integration
 
 
 def openai_responses_api_mcp_tool_request(
     query: str,
     mcp_server: dict,
     model: str = "gpt-5-nano",
-    reasoning: dict = {"effort": "low", "summary": "auto"},
+    reasoning: dict | None = None,
 ) -> dict:
+    if reasoning is None:
+        reasoning = {"effort": "low", "summary": "auto"}
+
     response = requests.post(
         url="https://api.openai.com/v1/responses",
         headers={
@@ -278,6 +318,7 @@ def openai_responses_api_mcp_tool_request(
             "reasoning": reasoning,
             "input": query,
         },
+        timeout=REQUEST_TIMEOUT_SECONDS,
     )
-
+    response.raise_for_status()
     return response.json()

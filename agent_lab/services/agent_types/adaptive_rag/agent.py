@@ -4,26 +4,25 @@ from pathlib import Path
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.constants import START, END
-from langgraph.graph import StateGraph, MessagesState
+from langgraph.graph import StateGraph
 from langgraph.managed import RemainingSteps
 from typing_extensions import Annotated, List, Literal
 
 from agent_lab.interface.api.messages.schema import MessageRequest
 from agent_lab.services.agent_types.adaptive_rag.schema import (
-    GradeDocuments,
-    GradeAnswer,
     GenerateAnswer,
 )
 from agent_lab.services.agent_types.base import (
     join_messages,
     AgentUtils,
+    DecisionState,
     WebAgentBase,
 )
 from agent_lab.services.tasks import TaskProgress
 from agent_lab.services.agent_types.registration import discoverable_agent
 
 
-class AgentState(MessagesState):
+class AgentState(DecisionState):
     agent_id: str
     schema: str
     query: str
@@ -97,6 +96,8 @@ class AdaptiveRagAgent(WebAgentBase):
             schema=schema,
         )
 
+        self.create_decision_settings(agent_id, schema)
+
     def format_response(self, workflow_state: AgentState) -> (str, dict):
         return workflow_state.get("generation"), {
             "agent_id": workflow_state.get("agent_id"),
@@ -122,40 +123,21 @@ class AdaptiveRagAgent(WebAgentBase):
 
         return re_write_prompt | chat_model | StrOutputParser()
 
-    def get_answer_grader(self, llm, answer_grader_system_prompt):
-        # LLM with function call
-        structured_llm_grader = llm.with_structured_output(GradeAnswer)
-
-        answer_prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", answer_grader_system_prompt),
-                ("human", "<query>{query}</query>\n<answer>{generation}</answer>"),
-            ]
-        )
-
-        return answer_prompt | structured_llm_grader
-
     def grade_generation_v_documents_and_question(
         self, state: AgentState
     ) -> Literal["complete_answer", "incomplete_answer"]:
-        agent_id = state["agent_id"]
-        schema = state["schema"]
         query = state["query"]
-        chat_model = self.get_chat_model(agent_id, schema)
         generation = state["generation"]
         remaining_steps = state["remaining_steps"]
         answer_grader_system_prompt = state["answer_grader_system_prompt"]
         limit_remaining_steps = 10
+
         # Check question-answering
-        score = self.get_answer_grader(chat_model, answer_grader_system_prompt).invoke(
-            {"query": query, "generation": generation}
+        is_complete = self.is_yes(
+            state, answer_grader_system_prompt, {"query": query, "answer": generation}
         )
 
-        grade = None
-        if score is not None:
-            grade = score["binary_score"]
-
-        if grade == "yes" or remaining_steps <= limit_remaining_steps:
+        if is_complete or remaining_steps <= limit_remaining_steps:
             return "complete_answer"
 
         return "incomplete_answer"
@@ -248,28 +230,10 @@ class AdaptiveRagAgent(WebAgentBase):
 
         return response
 
-    def get_retrieval_grader(self, chat_model, retrieval_grader_system_prompt):
-        # LLM with function call
-        structured_llm_grader = chat_model.with_structured_output(GradeDocuments)
-
-        grade_prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", retrieval_grader_system_prompt),
-                (
-                    "human",
-                    "<document>{document}</document>\n<query>{query}</query>",
-                ),
-            ]
-        )
-
-        return grade_prompt | structured_llm_grader
-
     def grade_documents(self, state: AgentState):
         agent_id = state["agent_id"]
-        schema = state["schema"]
         query = state["query"]
         documents = state["documents"]
-        chat_model = self.get_chat_model(agent_id, schema)
         retrieval_grader_system_prompt = state["retrieval_grader_system_prompt"]
         filtered_docs = []
         self.logger.info(f"Agent[{agent_id}] -> Document Grader -> Query -> {query} ")
@@ -281,18 +245,12 @@ class AdaptiveRagAgent(WebAgentBase):
             )
         )
         for d in documents:
-            score = self.get_retrieval_grader(
-                chat_model, retrieval_grader_system_prompt
-            ).invoke({"query": query, "document": d.page_content})
-
-            grade = None
-            if score is not None:
-                grade = score["binary_score"]
-
-            if grade == "yes":
+            if self.is_yes(
+                state,
+                retrieval_grader_system_prompt,
+                {"document": d.page_content, "query": query},
+            ):
                 filtered_docs.append(d)
-            else:
-                continue
 
         self.task_notification_service.publish_update(
             task_progress=TaskProgress(
@@ -391,5 +349,6 @@ class AdaptiveRagAgent(WebAgentBase):
             "retrieval_grader_system_prompt": self.parse_prompt_template(
                 settings_dict, "retrieval_grader_system_prompt", template_vars
             ),
+            **self.get_decision_params(settings_dict),
             "messages": [],
         }

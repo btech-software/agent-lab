@@ -48,6 +48,21 @@ class TestIntegrationsEndpoints:
         assert "id" in response_2.json()
 
     @pytest.mark.asyncio
+    async def test_create_typesafe_integration_success(self, client):
+        response = client.post(
+            url="/integrations/create",
+            headers={"Authorization": f"Bearer {os.getenv('ACCESS_TOKEN')}"},
+            json={
+                "api_endpoint": "https://api.typesafe.ai",
+                "api_key": "an_invalid_key",
+                "integration_type": "typesafe_api_v1",
+            },
+        )
+
+        assert response.status_code == 201
+        assert response.json()["integration_type"] == "typesafe_api_v1"
+
+    @pytest.mark.asyncio
     async def test_get_by_id_not_found(self, client):
         # given
         integration_id = "not_existing_id"

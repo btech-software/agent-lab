@@ -69,7 +69,7 @@ class TestLanguageModelService:
             language_model_tag="gpt-4",
             schema="test",
         )
-        assert setting_service.create_language_model_setting.call_count == 3
+        assert setting_service.create_language_model_setting.call_count == 4
         setting_service.create_language_model_setting.assert_has_calls(
             [
                 call(
@@ -88,6 +88,12 @@ class TestLanguageModelService:
                     language_model_id="lm-1",
                     setting_key="timeout",
                     setting_value="600",
+                    schema="test",
+                ),
+                call(
+                    language_model_id="lm-1",
+                    setting_key="structured_output_method",
+                    setting_value="default",
                     schema="test",
                 ),
             ]
@@ -111,7 +117,7 @@ class TestLanguageModelService:
         )
 
         assert result == lm
-        assert setting_service.create_language_model_setting.call_count == 3
+        assert setting_service.create_language_model_setting.call_count == 4
         setting_service.create_language_model_setting.assert_has_calls(
             [
                 call(
@@ -130,6 +136,12 @@ class TestLanguageModelService:
                     language_model_id="lm-1",
                     setting_key="timeout",
                     setting_value="600",
+                    schema="test",
+                ),
+                call(
+                    language_model_id="lm-1",
+                    setting_key="structured_output_method",
+                    setting_value="default",
                     schema="test",
                 ),
             ]

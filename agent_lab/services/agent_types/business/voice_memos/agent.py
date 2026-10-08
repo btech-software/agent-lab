@@ -6,7 +6,7 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.constants import START, END
-from langgraph.graph import MessagesState, StateGraph
+from langgraph.graph import StateGraph
 from langgraph.managed import RemainingSteps
 from langgraph.prebuilt import create_react_agent
 from langgraph.types import Command
@@ -17,6 +17,7 @@ from agent_lab.services.agent_types.azure import AzureEntraIdOrganizationWorkflo
 from agent_lab.services.agent_types.base import (
     SupervisedWorkflowAgentBase,
     AgentUtils,
+    DecisionState,
 )
 from agent_lab.services.agent_types.business.voice_memos import (
     SUPERVISED_AGENTS,
@@ -29,7 +30,6 @@ from agent_lab.services.agent_types.business.voice_memos import (
     AZURE_COORDINATOR_TOOLS_CONFIGURATION,
 )
 from agent_lab.services.agent_types.business.voice_memos.schema import (
-    SupervisorRouter,
     AudioAnalysisReport,
 )
 from agent_lab.services.agent_types.schema import SolutionPlan
@@ -39,7 +39,7 @@ from agent_lab.services.agent_types.registration import discoverable_agent
 CURRENT_TIME_PATTERN = "%a %b %d %Y %H:%M:%S %z"
 
 
-class AgentState(MessagesState):
+class AgentState(DecisionState):
     agent_id: str
     schema: str
     attachment_id: str
@@ -52,6 +52,7 @@ class AgentState(MessagesState):
     coordinator_system_prompt: str
     planner_system_prompt: str
     supervisor_system_prompt: str
+    supervisor_completion_prompt: str
     content_analyst_system_prompt: str
     reporter_system_prompt: str
     execution_plan: str
@@ -96,6 +97,16 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
             agent_id=agent_id,
             setting_key="supervisor_system_prompt",
             setting_value=supervisor_prompt,
+            schema=schema,
+        )
+
+        supervisor_completion_prompt = self.read_file_content(
+            f"{current_dir}/default_supervisor_completion_prompt.txt"
+        )
+        self.agent_setting_service.create_agent_setting(
+            agent_id=agent_id,
+            setting_key="supervisor_completion_prompt",
+            setting_value=supervisor_completion_prompt,
             schema=schema,
         )
 
@@ -156,6 +167,8 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
             schema=schema,
         )
 
+        self.create_decision_settings(agent_id, schema)
+
     def get_input_params(self, message_request: MessageRequest, schema: str) -> dict:
         settings = self.agent_setting_service.get_agent_settings(
             message_request.agent_id, schema
@@ -163,6 +176,11 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
         settings_dict = {
             setting.setting_key: setting.setting_value for setting in settings
         }
+        if "supervisor_completion_prompt" not in settings_dict:
+            # agents created before this setting existed use the packaged default
+            settings_dict["supervisor_completion_prompt"] = self.read_file_content(
+                f"{Path(__file__).parent}/default_supervisor_completion_prompt.txt"
+            )
 
         template_vars = {
             "CURRENT_TIME": datetime.now().strftime(CURRENT_TIME_PATTERN),
@@ -183,6 +201,7 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
             "audio_format": settings_dict.get("audio_format"),
             "query": message_request.message_content,
             "structured_report": None,
+            **self.get_decision_params(settings_dict),
             "content_analyst_system_prompt": self.parse_prompt_template(
                 settings_dict, "content_analyst_system_prompt", template_vars
             ),
@@ -194,6 +213,9 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
             ),
             "supervisor_system_prompt": self.parse_prompt_template(
                 settings_dict, "supervisor_system_prompt", template_vars
+            ),
+            "supervisor_completion_prompt": self.parse_prompt_template(
+                settings_dict, "supervisor_completion_prompt", template_vars
             ),
             "reporter_system_prompt": self.parse_prompt_template(
                 settings_dict, "reporter_system_prompt", template_vars
@@ -214,12 +236,18 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
         coordinator_system_prompt = state["coordinator_system_prompt"]
 
         if attachment_id is None:
+            # text requests pass the base accept/deny gate first
+            gate = super().get_coordinator(state)
+            if gate.goto == END:
+                return gate
+
             self.logger.info(f"Agent[{agent_id}] -> Coordinator -> Query -> {query}")
 
             coordinator = create_react_agent(
                 model=self.get_chat_model(agent_id, schema),
                 tools=self.get_coordinator_tools(),
-                prompt=coordinator_system_prompt,
+                prompt=self.get_worker_prompt(coordinator_system_prompt),
+                name="coordinator",
             )
             response = coordinator.invoke(state)
             response_message = response["messages"][-1]
@@ -297,7 +325,7 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
                 f"Agent[{agent_id}] -> Coordinator -> Response -> {response}"
             )
             return Command(
-                goto="planner",
+                goto=self.coordinator_accept_node,
                 update={
                     "messages": [
                         AIMessage(
@@ -359,32 +387,29 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
             goto="supervisor",
         )
 
+    def get_coordinator_context(self, state: AgentState) -> dict:
+        context = super().get_coordinator_context(state)
+        messages = state["messages"]
+        last_human = max(
+            (i for i, m in enumerate(messages) if isinstance(m, HumanMessage)),
+            default=len(messages),
+        )
+        if last_human > 0:
+            context["conversation"] = "\n".join(
+                f"{message.type}: {message.content}"
+                for message in messages[:last_human]
+            )
+        return context
+
     def get_supervisor(
         self, state: AgentState
     ) -> Command[Literal[*SUPERVISED_AGENTS, "__end__"]]:
-        messages = self.get_last_interaction_messages(state["messages"])
-        agent_id = state["agent_id"]
-        schema = state["schema"]
-        self.logger.info(f"Agent[{agent_id}] -> Supervisor -> Messages -> {messages}")
-        supervisor_system_prompt = state["supervisor_system_prompt"]
-        structured_report = state["structured_report"]
-        chat_model = self.get_chat_model(agent_id, schema).bind_tools(
-            self.get_supervisor_tools()
-        )
-        chat_model_with_structured_output = chat_model.with_structured_output(
-            SupervisorRouter
-        )
-        if structured_report is None:
-            response = self.get_supervisor_chain(
-                llm=chat_model_with_structured_output,
-                supervisor_system_prompt=supervisor_system_prompt,
-            ).invoke({"messages": messages})
-            self.logger.info(
-                f"Agent[{agent_id}] -> Supervisor -> Response -> {response}"
-            )
-            return Command(goto=response["next"], update={"next": response["next"]})
-        else:
-            return Command(goto="__end__")
+        if state["structured_report"] is not None:
+            return Command(goto=END)
+        return super().get_supervisor(state)
+
+    def get_supervised_agents_configuration(self) -> dict:
+        return SUPERVISED_AGENT_CONFIGURATION
 
     def get_reporter_chain(self, llm, reporter_system_prompt: str):
         structured_llm_generator = llm.bind_tools(
@@ -446,7 +471,8 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
         content_analyst = create_react_agent(
             model=self.get_chat_model(agent_id, schema),
             tools=self.get_content_analyst_tools(),
-            prompt=content_analyst_system_prompt,
+            prompt=self.get_worker_prompt(content_analyst_system_prompt),
+            name="content_analyst",
         )
         response = content_analyst.invoke(state)
 
@@ -506,6 +532,8 @@ class AzureEntraIdVoiceMemosAgent(
 
 @discoverable_agent("fast_voice_memos")
 class FastVoiceMemosAgent(VoiceMemosAgent):
+    coordinator_accept_node = "content_analyst"
+
     def __init__(self, agent_utils: AgentUtils):
         super().__init__(agent_utils)
 
@@ -534,6 +562,7 @@ class FastVoiceMemosAgent(VoiceMemosAgent):
             "audio_format": settings_dict.get("audio_format"),
             "query": message_request.message_content,
             "structured_report": None,
+            **self.get_decision_params(settings_dict),
             "content_analyst_system_prompt": self.parse_prompt_template(
                 settings_dict, "content_analyst_system_prompt", template_vars
             ),
@@ -553,12 +582,8 @@ class FastVoiceMemosAgent(VoiceMemosAgent):
     def get_coordinator(
         self, state: AgentState
     ) -> Command[Literal["content_analyst", "__end__"]]:
-        original_command = super().get_coordinator(state)
-
-        return Command(
-            goto="__end__" if original_command.goto == END else "content_analyst",
-            update=original_command.update,
-        )
+        # return annotation drives LangGraph's edge inference for this graph
+        return super().get_coordinator(state)
 
     def get_content_analyst(self, state: AgentState) -> Command[Literal["__end__"]]:
         agent_id = state["agent_id"]
@@ -575,7 +600,8 @@ class FastVoiceMemosAgent(VoiceMemosAgent):
         content_analyst = create_react_agent(
             model=self.get_chat_model(agent_id, schema),
             tools=self.get_content_analyst_tools(),
-            prompt=content_analyst_system_prompt,
+            prompt=self.get_worker_prompt(content_analyst_system_prompt),
+            name="content_analyst",
             response_format=AudioAnalysisReport,
         )
         response = content_analyst.invoke(state)

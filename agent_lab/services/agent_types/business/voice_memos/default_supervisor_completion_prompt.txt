@@ -1,0 +1,1 @@
+The work is complete when the `reporter` has formatted a final answer as a JSON document that addresses the user instructions and is supported by the transcription.

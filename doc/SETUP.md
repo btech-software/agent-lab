@@ -59,7 +59,7 @@ minikube ip
 After the domain names are determined, modify system hosts file to include domains assigned to minikube vm ip address:
 ```txt
 
-192.168.49.2 vault.my-domain.com kibana.my-domain.com elasticsearch.my-domain.com agent-lab.my-domain.com
+192.168.49.2 vault.my-domain.com kibana.my-domain.com elasticsearch.my-domain.com agent-lab.my-domain.com litellm.my-domain.com
 
 ```
 
@@ -93,7 +93,7 @@ terraform apply
 Modify system hosts file to include domains assigned to localhost address:
 ```txt
 
-127.0.0.1 vault.my-domain.com kibana.my-domain.com elasticsearch.my-domain.com agent-lab.my-domain.com
+127.0.0.1 vault.my-domain.com kibana.my-domain.com elasticsearch.my-domain.com agent-lab.my-domain.com litellm.my-domain.com
 
 ```
 
@@ -245,6 +245,30 @@ echo "$(kubectl --namespace elastic get secret/elastic-eck-apm-server-apm-token 
 cd terraform/12-otel-instance/
 terraform init
 terraform apply
+```
+
+### Setup LiteLLM Gateway
+
+[LiteLLM](https://docs.litellm.ai) is a self-hosted OpenAI-compatible LLM gateway. It exposes an OpenAI v1 API (`https://<litellm_fqdn>/v1`) backed by the upstream models configured through the `models` variable, with virtual keys, spend tracking and an admin UI (`/ui`) persisted in PostgreSQL (CloudNativePG) and coordination state in Redis.
+
+Please determine a <litellm_fqdn> for accessing the gateway, example: litellm.my-domain.com
+
+```bash
+cd terraform/17_litellm-instance/
+terraform init
+terraform apply
+```
+
+Retrieve the admin master key (API + UI login):
+
+```bash
+echo "$(kubectl --namespace litellm get secret/litellm-masterkey -o go-template='{{index .data "masterkey" | base64decode}}')"
+```
+
+Verify the gateway is healthy:
+
+```bash
+curl -s https://<litellm_fqdn>/health/readiness
 ```
 
 ---

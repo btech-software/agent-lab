@@ -70,6 +70,15 @@ class LanguageModelService:
             schema=schema,
         )
 
+        # structured output method override (e.g. "function_calling");
+        # "default" keeps the provider library default
+        self.setting_service.create_language_model_setting(
+            language_model_id=language_model.id,
+            setting_key="structured_output_method",
+            setting_value="default",
+            schema=schema,
+        )
+
         return language_model
 
     def delete_language_model_by_id(self, language_model_id: str, schema: str) -> None:

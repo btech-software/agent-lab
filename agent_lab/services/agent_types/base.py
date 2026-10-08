@@ -20,18 +20,22 @@ from dependency_injector.providers import Configuration
 from jinja2 import Environment, DictLoader, select_autoescape
 from langchain_anthropic import ChatAnthropic
 from langchain_core.embeddings import Embeddings
+from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool, BaseTool
 from langchain_xai import ChatXAI
 from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from markitdown import MarkItDown
+from langgraph.constants import END
 from langgraph.graph import MessagesState
 from langgraph.types import Command
 from openai import OpenAI
-from typing_extensions import List, Annotated, Literal
+from typesafe_sdk import Choice, Noul, TypeSafeClient
+from typing_extensions import Annotated, Callable, List, Literal, TypeVar
 
 from agent_lab.domain.exceptions.base import ConfigurationError, ResourceNotFoundError
 from agent_lab.domain.models import Agent, Integration, LanguageModel
@@ -44,6 +48,7 @@ from agent_lab.infrastructure.metrics.tracing import (
 from agent_lab.interface.api.messages.schema import MessageRequest, Message
 from agent_lab.services.agent_settings import AgentSettingService
 from agent_lab.services.agents import AgentService
+from agent_lab.services.agent_types.schema import BinaryDecision
 from agent_lab.services.attachments import AttachmentService
 from agent_lab.services.integrations import IntegrationService
 from agent_lab.services.language_model_settings import LanguageModelSettingService
@@ -65,6 +70,63 @@ def join_messages(left: List, right: List) -> List:
             unique_messages.append(msg)
 
     return unique_messages
+
+
+def _structured_output_method(lm_settings_dict: dict) -> str | None:
+    # absent (pre-existing models) or "default" keeps the library default
+    method = lm_settings_dict.get("structured_output_method")
+    return None if method in (None, "default") else method
+
+
+# attempts for a structured output call before giving up
+STRUCTURED_OUTPUT_ATTEMPTS = 3
+
+
+class StructuredOutputMissingError(Exception):
+    """The model answered without the requested structured output."""
+
+
+def _require_structured_output(result):
+    if result is None:
+        raise StructuredOutputMissingError("model returned no structured output")
+    return result
+
+
+class StructuredOutputChatOpenAI(ChatOpenAI):
+    # default with_structured_output method, set per language model; models
+    # differ in which method they handle reliably (e.g. gpt-oss needs
+    # function_calling on ollama). None keeps the library default.
+    structured_output_method: str | None = None
+
+    def with_structured_output(self, schema=None, **kwargs):
+        if self.structured_output_method is not None:
+            kwargs.setdefault("method", self.structured_output_method)
+        runnable = super().with_structured_output(schema, **kwargs)
+        if kwargs.get("include_raw"):
+            # callers asking for the raw output handle parsing failures themselves
+            return runnable
+        # openai-compatible servers such as ollama don't enforce tool_choice, so
+        # models occasionally answer in plain text; retry instead of returning None
+        return (runnable | RunnableLambda(_require_structured_output)).with_retry(
+            retry_if_exception_type=(
+                StructuredOutputMissingError,
+                OutputParserException,
+            ),
+            stop_after_attempt=STRUCTURED_OUTPUT_ATTEMPTS,
+        )
+
+
+# minimum jev noul probability for a 'yes' decision
+JEV_DECISION_THRESHOLD = 0.5
+
+DecisionT = TypeVar("DecisionT")
+
+
+class DecisionState(MessagesState):
+    agent_id: str
+    schema: str
+    decision_engine: str
+    jev_integration_id: str
 
 
 class AgentUtils:
@@ -96,6 +158,10 @@ class AgentUtils:
 
 
 class AgentBase(ABC):
+    # engine for is_yes/choose decisions: "llm" or "jev" (jev needs a
+    # typesafe_api_v1 integration and falls back to the llm otherwise)
+    default_decision_engine = "llm"
+
     def __init__(self, agent_utils: AgentUtils):
         self.base_url = agent_utils.config.get("api_base_url")
         self.agent_service = agent_utils.agent_service
@@ -170,6 +236,7 @@ class AgentBase(ABC):
             openai_api_base=api_endpoint,
             openai_api_key=api_key,
             check_embedding_ctx_length=False,
+            chunk_size=100,
         )
 
     def get_chat_model(
@@ -199,10 +266,11 @@ class AgentBase(ABC):
             guardrail_kwargs["timeout"] = float(lm_settings_dict["timeout"])
 
         if integration.integration_type == "openai_api_v1":
-            return ChatOpenAI(
+            return StructuredOutputChatOpenAI(
                 model_name=language_model_tag,
                 openai_api_base=api_endpoint,
                 openai_api_key=api_key,
+                structured_output_method=_structured_output_method(lm_settings_dict),
                 **guardrail_kwargs,
             )
         elif integration.integration_type == "xai_api_v1":
@@ -253,13 +321,140 @@ class AgentBase(ABC):
         template = env.get_template(prompt_key)
         return template.render(template_vars)
 
+    def create_decision_settings(self, agent_id: str, schema: str):
+        self.agent_setting_service.create_agent_setting(
+            agent_id=agent_id,
+            setting_key="decision_engine",
+            setting_value=self.default_decision_engine,
+            schema=schema,
+        )
+        self.agent_setting_service.create_agent_setting(
+            agent_id=agent_id,
+            setting_key="jev_integration_id",
+            setting_value="",
+            schema=schema,
+        )
+
+    def get_decision_params(self, settings_dict: dict) -> dict:
+        # agents created before these settings existed get the defaults
+        return {
+            "decision_engine": settings_dict.get(
+                "decision_engine", self.default_decision_engine
+            ),
+            "jev_integration_id": settings_dict.get("jev_integration_id", ""),
+        }
+
+    def is_yes(self, state: dict, instructions: str, context: dict) -> bool:
+        def jev_fn() -> bool:
+            answer = self._ask_jev(state, context, Noul(instructions=instructions))
+            return answer.noul >= JEV_DECISION_THRESHOLD
+
+        def llm_fn() -> bool:
+            result = self._ask_llm(state, instructions, context, BinaryDecision)
+            return result is not None and result.get("binary_score") == "yes"
+
+        return self._decide(state, jev_fn, llm_fn)
+
+    def choose(
+        self,
+        state: dict,
+        instructions: str,
+        options: dict[str, str],
+        context: dict,
+        fallback: str,
+    ) -> str:
+        def jev_fn() -> str:
+            question = Choice(instructions=instructions, criteria=options)
+            return self._ask_jev(state, context, question).choice
+
+        def llm_fn() -> str | None:
+            output_schema = {
+                "title": "Choice",
+                "description": "Select exactly one option.",
+                "type": "object",
+                "properties": {
+                    "choice": {
+                        "type": "string",
+                        "enum": list(options),
+                        "description": "; ".join(
+                            f"{label}: {desc}" for label, desc in options.items()
+                        ),
+                    }
+                },
+                "required": ["choice"],
+            }
+            result = self._ask_llm(state, instructions, context, output_schema)
+            return None if result is None else result.get("choice")
+
+        choice = self._decide(state, jev_fn, llm_fn)
+        if choice not in options:
+            self.logger.warning(
+                f"Agent[{state['agent_id']}] -> Invalid choice {choice!r}, using {fallback!r}"
+            )
+            return fallback
+        return choice
+
+    def _decide(
+        self,
+        state: dict,
+        jev_fn: Callable[[], DecisionT],
+        llm_fn: Callable[[], DecisionT],
+    ) -> DecisionT:
+        if state.get("decision_engine") == "jev" and state.get("jev_integration_id"):
+            try:
+                return jev_fn()
+            except Exception as e:
+                self.logger.warning(
+                    f"Agent[{state['agent_id']}] -> JEV decision failed, falling back to LLM -> {e}"
+                )
+        return llm_fn()
+
+    def _ask_jev(self, state: dict, context: dict, question):
+        integration = self.integration_service.get_integration_by_id(
+            state["jev_integration_id"], state["schema"]
+        )
+        api_endpoint, api_key = self.get_integration_credentials(integration)
+        with TypeSafeClient(api_key=api_key, base_url=api_endpoint) as client:
+            return client.system_one(
+                state=context, questions={"decision": question}
+            ).answers["decision"]
+
+    def _ask_llm(self, state: dict, instructions: str, context: dict, output_schema):
+        # instructions go in as a variable so literal braces are never parsed
+        prompt = ChatPromptTemplate.from_messages(
+            [("system", "{instructions}"), ("human", "{context}")]
+        )
+        chat_model = self.get_chat_model(state["agent_id"], state["schema"])
+        return (prompt | chat_model.with_structured_output(output_schema)).invoke(
+            {
+                "instructions": instructions,
+                "context": "\n".join(
+                    f"<{key}>{value}</{key}>" for key, value in context.items()
+                ),
+            }
+        )
+
 
 class WorkflowAgentBase(AgentBase, ABC):
     QUERY_FORMAT = "<query>{query}</query>"
+    WORKER_TURN_PROMPT = "Continue with your task based on the conversation above."
 
     def __init__(self, agent_utils: AgentUtils):
         super().__init__(agent_utils)
         self.graph_persistence_factory = agent_utils.graph_persistence_factory
+
+    def get_worker_prompt(self, system_prompt: str) -> Callable[[dict], list]:
+        # workers run on the shared history, which usually ends with the previous
+        # node's assistant message; some chat templates (e.g. gpt-oss on ollama)
+        # generate nothing after a trailing assistant turn, so hand the turn back
+        # to the worker without persisting the extra message in the graph state
+        def prompt(state: dict) -> list:
+            messages = [SystemMessage(content=system_prompt), *state["messages"]]
+            if isinstance(messages[-1], AIMessage):
+                messages.append(HumanMessage(content=self.WORKER_TURN_PROMPT))
+            return messages
+
+        return prompt
 
     @abstractmethod
     def get_workflow_builder(self, agent_id: str):
@@ -696,26 +891,78 @@ class WebAgentBase(WorkflowAgentBase, ABC):
 
 
 class SupervisedWorkflowAgentBase(WebAgentBase, ABC):
+    # coordinator and supervisor decide with jev by default; agents without a
+    # typesafe_api_v1 integration fall back to the llm transparently
+    default_decision_engine = "jev"
+    # node that receives requests accepted by the coordinator
+    coordinator_accept_node = "planner"
+
+    COORDINATOR_QUESTION = (
+        "Should this request be accepted and handed off to the team? "
+        "Answer yes to accept, no to deny."
+    )
+    COMPLETION_QUESTION = (
+        "Judge the latest work critically: is the work complete according "
+        "to the completion criteria?"
+    )
+    ROUTING_QUESTION = "Which team member should work next?"
+    # remaining graph steps at which the supervisor ends instead of deciding
+    SUPERVISOR_STEP_RESERVE = 2
+
     def __init__(self, agent_utils: AgentUtils):
         super().__init__(agent_utils)
+
+    def get_supervised_agents_configuration(self) -> dict:
+        # {worker_name: {"desc_for_llm": str, ...}}; required by get_supervisor
+        raise NotImplementedError(
+            "override get_supervised_agents_configuration to use the base supervisor"
+        )
 
     def get_coordinator_tools(self) -> list:
         return []
 
-    @abstractmethod
-    def get_coordinator(
-        self, state: MessagesState
-    ) -> Command[Literal["planner", "__end__"]]:
-        pass
+    def get_coordinator_context(self, state: dict) -> dict:
+        return {"query": state["query"]}
 
-    def get_coordinator_chain(self, llm, coordinator_system_prompt: str):
-        coordinator_prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", coordinator_system_prompt),
-                ("human", WorkflowAgentBase.QUERY_FORMAT),
-            ]
+    def get_coordinator(self, state: dict) -> Command:
+        agent_id = state["agent_id"]
+        query = state["query"]
+        self.logger.info(f"Agent[{agent_id}] -> Coordinator -> Query -> {query}")
+        self.task_notification_service.publish_update(
+            task_progress=TaskProgress(
+                agent_id=agent_id,
+                status="in_progress",
+                message_content=f"Analyzing query: {query}",
+            )
         )
-        return coordinator_prompt | llm
+        accepted = self.is_yes(
+            state,
+            f"{state['coordinator_system_prompt']}\n\n{self.COORDINATOR_QUESTION}",
+            self.get_coordinator_context(state),
+        )
+        self.logger.info(f"Agent[{agent_id}] -> Coordinator -> Accepted -> {accepted}")
+        if accepted:
+            return Command(goto=self.coordinator_accept_node)
+        return Command(
+            goto=END,
+            update={"messages": [self.get_coordinator_denial_reply(state)]},
+        )
+
+    def get_coordinator_denial_reply(self, state: dict) -> AIMessage:
+        prompt = ChatPromptTemplate.from_messages(
+            [("system", "{instructions}"), ("human", WorkflowAgentBase.QUERY_FORMAT)]
+        )
+        chat_model = self.get_chat_model(state["agent_id"], state["schema"])
+        response = (prompt | chat_model).invoke(
+            {
+                "instructions": (
+                    f"{state['coordinator_system_prompt']}\n\n"
+                    "This request was denied. Write the reply to the user."
+                ),
+                "query": state["query"],
+            }
+        )
+        return AIMessage(content=response.content, name="coordinator")
 
     def get_planner_tools(self) -> list:
         return [self.get_web_search_tool(), self.get_web_crawl_tool()]
@@ -743,21 +990,51 @@ class SupervisedWorkflowAgentBase(WebAgentBase, ABC):
         )
         return planner_prompt | llm
 
-    def get_supervisor_tools(self) -> list:
-        return []
+    def get_supervisor(self, state: dict) -> Command:
+        agent_id = state["agent_id"]
+        remaining_steps = state.get("remaining_steps")
+        if (
+            remaining_steps is not None
+            and remaining_steps <= self.SUPERVISOR_STEP_RESERVE
+        ):
+            self.logger.warning(
+                f"Agent[{agent_id}] -> Supervisor -> Step budget exhausted, ending"
+            )
+            return Command(goto=END, update={"next": END})
+        messages = self.get_last_interaction_messages(state["messages"])
+        supervisor_system_prompt = state["supervisor_system_prompt"]
+        context = {
+            "query": state["query"],
+            "execution_plan": json.dumps(
+                state.get("execution_plan"), ensure_ascii=False
+            ),
+            # label each message with its author so the completion criteria
+            # (e.g. "the reporter has delivered") can be judged
+            "latest_work": "\n\n".join(
+                f"{getattr(message, 'name', None) or message.type}: {message.content}"
+                for message in messages
+            ),
+        }
+        self.logger.info(f"Agent[{agent_id}] -> Supervisor -> Messages -> {messages}")
 
-    @abstractmethod
-    def get_supervisor(self, state: MessagesState) -> Command:
-        pass
-
-    def get_supervisor_chain(self, llm, supervisor_system_prompt: str):
-        supervisor_prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", supervisor_system_prompt),
-                ("human", "<messages>{messages}</messages>"),
-            ]
-        )
-        return supervisor_prompt | llm
+        # completeness gets its own focused instructions: a classifier judging
+        # yes/no against the full routing prompt rejects even finished work
+        completion_prompt = state["supervisor_completion_prompt"]
+        if self.is_yes(
+            state, f"{completion_prompt}\n\n{self.COMPLETION_QUESTION}", context
+        ):
+            next_node = END
+        else:
+            team = self.get_supervised_agents_configuration()
+            next_node = self.choose(
+                state,
+                f"{supervisor_system_prompt}\n\n{self.ROUTING_QUESTION}",
+                {name: config["desc_for_llm"] for name, config in team.items()},
+                context,
+                fallback=END,
+            )
+        self.logger.info(f"Agent[{agent_id}] -> Supervisor -> Next -> {next_node}")
+        return Command(goto=next_node, update={"next": next_node})
 
     @abstractmethod
     def get_reporter(self, state: MessagesState) -> Command[Literal["supervisor"]]:
