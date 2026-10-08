@@ -227,7 +227,8 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
             coordinator = create_react_agent(
                 model=self.get_chat_model(agent_id, schema),
                 tools=self.get_coordinator_tools(),
-                prompt=coordinator_system_prompt,
+                prompt=self.get_worker_prompt(coordinator_system_prompt),
+                name="coordinator",
             )
             response = coordinator.invoke(state)
             response_message = response["messages"][-1]
@@ -451,7 +452,8 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
         content_analyst = create_react_agent(
             model=self.get_chat_model(agent_id, schema),
             tools=self.get_content_analyst_tools(),
-            prompt=content_analyst_system_prompt,
+            prompt=self.get_worker_prompt(content_analyst_system_prompt),
+            name="content_analyst",
         )
         response = content_analyst.invoke(state)
 
@@ -579,7 +581,8 @@ class FastVoiceMemosAgent(VoiceMemosAgent):
         content_analyst = create_react_agent(
             model=self.get_chat_model(agent_id, schema),
             tools=self.get_content_analyst_tools(),
-            prompt=content_analyst_system_prompt,
+            prompt=self.get_worker_prompt(content_analyst_system_prompt),
+            name="content_analyst",
             response_format=AudioAnalysisReport,
         )
         response = content_analyst.invoke(state)

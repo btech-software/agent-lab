@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_xai import ChatXAI
@@ -15,8 +15,10 @@ from agent_lab.interface.api.messages.schema import Message, MessageRequest
 from agent_lab.services.agent_types.adaptive_rag.agent import AdaptiveRagAgent
 from agent_lab.services.agent_types.azure import AzureEntraIdOrganizationWorkflowBase
 from agent_lab.services.agent_types.base import (
+    STRUCTURED_OUTPUT_ATTEMPTS,
     AgentUtils,
     ContactSupportAgentBase,
+    StructuredOutputMissingError,
     WorkflowAgentBase,
     join_messages,
 )
@@ -155,6 +157,51 @@ class TestGetChatModel:
 
         # no method passed: the library default applies
         parent_method.assert_called_once_with(dict)
+
+    @patch.object(ChatOpenAI, "with_structured_output")
+    def test_structured_output_retries_when_model_skips_it(self, parent_method):
+        # e.g. ollama ignores tool_choice and the model answers in plain text
+        outputs = iter([None, {"plan": "ok"}])
+        calls = []
+
+        def model(_):
+            calls.append(1)
+            return next(outputs)
+
+        parent_method.return_value = RunnableLambda(model)
+        agent = _make_agent("openai_api_v1")
+
+        runnable = agent.get_chat_model("agent-1", "test", "m").with_structured_output(
+            dict
+        )
+
+        assert runnable.invoke("q") == {"plan": "ok"}
+        assert len(calls) == 2
+
+    @patch.object(ChatOpenAI, "with_structured_output")
+    def test_structured_output_raises_after_retries(self, parent_method):
+        calls = []
+        parent_method.return_value = RunnableLambda(lambda _: calls.append(1))
+        agent = _make_agent("openai_api_v1")
+
+        runnable = agent.get_chat_model("agent-1", "test", "m").with_structured_output(
+            dict
+        )
+
+        with pytest.raises(StructuredOutputMissingError):
+            runnable.invoke("q")
+        assert len(calls) == STRUCTURED_OUTPUT_ATTEMPTS
+
+    @patch.object(ChatOpenAI, "with_structured_output")
+    def test_structured_output_include_raw_is_not_wrapped(self, parent_method):
+        agent = _make_agent("openai_api_v1")
+
+        runnable = agent.get_chat_model("agent-1", "test", "m").with_structured_output(
+            dict, include_raw=True
+        )
+
+        # callers asking for the raw output handle parsing failures themselves
+        assert runnable is parent_method.return_value
 
     def test_unsupported_integration_type_raises(self):
         agent = _make_agent("ollama_api_v1")
@@ -325,6 +372,39 @@ class TestDecisionPrimitives:
         ]
         assert calls[0].kwargs["setting_value"] == "llm"
         assert calls[1].kwargs["setting_value"] == ""
+
+
+class TestWorkerPrompt:
+    def _prompt(self):
+        agent = CoordinatorPlannerSupervisorAgent(agent_utils=MagicMock())
+        return agent.get_worker_prompt("you are a reporter")
+
+    def test_adds_user_turn_after_trailing_assistant_message(self):
+        state = {"messages": [HumanMessage(content="q"), AIMessage(content="findings")]}
+
+        messages = self._prompt()(state)
+
+        assert messages[0].type == "system"
+        assert messages[0].content == "you are a reporter"
+        assert [m.content for m in messages[1:3]] == ["q", "findings"]
+        assert messages[-1].type == "human"
+        assert messages[-1].content == WorkflowAgentBase.WORKER_TURN_PROMPT
+
+    def test_keeps_history_ending_with_user_or_tool_message(self):
+        for last in (
+            HumanMessage(content="q"),
+            ToolMessage(content="result", tool_call_id="t1"),
+        ):
+            messages = self._prompt()({"messages": [last]})
+
+            assert [m.type for m in messages] == ["system", last.type]
+
+    def test_does_not_mutate_state(self):
+        history = [HumanMessage(content="q"), AIMessage(content="findings")]
+
+        self._prompt()({"messages": history})
+
+        assert len(history) == 2
 
 
 class TestJoinMessages:
@@ -931,6 +1011,23 @@ class TestCoordinatorPlannerSupervisorAgent:
 
         assert "partial" in agent.is_yes.call_args.args[2]["latest_work"]
 
+    def test_get_supervisor_attributes_work_to_its_author(self):
+        agent = self._agent()
+        agent.is_yes = MagicMock(return_value=True)
+        state = self._state(
+            messages=[
+                HumanMessage(content="what?"),
+                AIMessage(content="findings", name="researcher"),
+                AIMessage(content="final report", name="reporter"),
+            ]
+        )
+
+        agent.get_supervisor(state)
+
+        assert agent.is_yes.call_args.args[2]["latest_work"] == (
+            "human: what?\n\nresearcher: findings\n\nreporter: final report"
+        )
+
     def test_get_supervisor_ends_when_step_budget_exhausted(self):
         agent = self._agent()
         agent.is_yes = MagicMock()
@@ -1073,6 +1170,13 @@ class TestCoordinatorPlannerSupervisorAgent:
         command = agent.get_reporter(self._state())
 
         assert command.goto == "supervisor"
+        # the name attributes the worker's messages for the supervisor
+        assert create_react_agent_mock.call_args.kwargs["name"] == "reporter"
+        # the worker prompt hands the turn back after the previous node's output
+        prompt = create_react_agent_mock.call_args.kwargs["prompt"]
+        messages = prompt({"messages": [AIMessage(content="findings")]})
+        assert messages[0].content == "reporter"
+        assert messages[-1].type == "human"
 
 
 class TestAdaptiveRagAgent:

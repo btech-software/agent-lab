@@ -20,9 +20,11 @@ from dependency_injector.providers import Configuration
 from jinja2 import Environment, DictLoader, select_autoescape
 from langchain_anthropic import ChatAnthropic
 from langchain_core.embeddings import Embeddings
+from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool, BaseTool
 from langchain_xai import ChatXAI
 from langchain_community.tools import DuckDuckGoSearchResults
@@ -76,6 +78,20 @@ def _structured_output_method(lm_settings_dict: dict) -> str | None:
     return None if method in (None, "default") else method
 
 
+# attempts for a structured output call before giving up
+STRUCTURED_OUTPUT_ATTEMPTS = 3
+
+
+class StructuredOutputMissingError(Exception):
+    """The model answered without the requested structured output."""
+
+
+def _require_structured_output(result):
+    if result is None:
+        raise StructuredOutputMissingError("model returned no structured output")
+    return result
+
+
 class StructuredOutputChatOpenAI(ChatOpenAI):
     # default with_structured_output method, set per language model; models
     # differ in which method they handle reliably (e.g. gpt-oss needs
@@ -85,7 +101,19 @@ class StructuredOutputChatOpenAI(ChatOpenAI):
     def with_structured_output(self, schema=None, **kwargs):
         if self.structured_output_method is not None:
             kwargs.setdefault("method", self.structured_output_method)
-        return super().with_structured_output(schema, **kwargs)
+        runnable = super().with_structured_output(schema, **kwargs)
+        if kwargs.get("include_raw"):
+            # callers asking for the raw output handle parsing failures themselves
+            return runnable
+        # openai-compatible servers such as ollama don't enforce tool_choice, so
+        # models occasionally answer in plain text; retry instead of returning None
+        return (runnable | RunnableLambda(_require_structured_output)).with_retry(
+            retry_if_exception_type=(
+                StructuredOutputMissingError,
+                OutputParserException,
+            ),
+            stop_after_attempt=STRUCTURED_OUTPUT_ATTEMPTS,
+        )
 
 
 # minimum jev noul probability for a 'yes' decision
@@ -409,10 +437,24 @@ class AgentBase(ABC):
 
 class WorkflowAgentBase(AgentBase, ABC):
     QUERY_FORMAT = "<query>{query}</query>"
+    WORKER_TURN_PROMPT = "Continue with your task based on the conversation above."
 
     def __init__(self, agent_utils: AgentUtils):
         super().__init__(agent_utils)
         self.graph_persistence_factory = agent_utils.graph_persistence_factory
+
+    def get_worker_prompt(self, system_prompt: str) -> Callable[[dict], list]:
+        # workers run on the shared history, which usually ends with the previous
+        # node's assistant message; some chat templates (e.g. gpt-oss on ollama)
+        # generate nothing after a trailing assistant turn, so hand the turn back
+        # to the worker without persisting the extra message in the graph state
+        def prompt(state: dict) -> list:
+            messages = [SystemMessage(content=system_prompt), *state["messages"]]
+            if isinstance(messages[-1], AIMessage):
+                messages.append(HumanMessage(content=self.WORKER_TURN_PROMPT))
+            return messages
+
+        return prompt
 
     @abstractmethod
     def get_workflow_builder(self, agent_id: str):
@@ -966,8 +1008,11 @@ class SupervisedWorkflowAgentBase(WebAgentBase, ABC):
             "execution_plan": json.dumps(
                 state.get("execution_plan"), ensure_ascii=False
             ),
+            # label each message with its author so the completion criteria
+            # (e.g. "the reporter has delivered") can be judged
             "latest_work": "\n\n".join(
-                str(getattr(message, "content", message)) for message in messages
+                f"{getattr(message, 'name', None) or message.type}: {message.content}"
+                for message in messages
             ),
         }
         self.logger.info(f"Agent[{agent_id}] -> Supervisor -> Messages -> {messages}")

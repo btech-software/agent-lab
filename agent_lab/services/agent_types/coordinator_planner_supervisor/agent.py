@@ -336,7 +336,8 @@ class CoordinatorPlannerSupervisorAgent(SupervisedWorkflowAgentBase):
         researcher = create_react_agent(
             model=chat_model,
             tools=tools,
-            prompt=researcher_system_prompt,
+            prompt=self.get_worker_prompt(researcher_system_prompt),
+            name="researcher",
         )
         response = researcher.invoke(state)
 
@@ -428,7 +429,8 @@ class CoordinatorPlannerSupervisorAgent(SupervisedWorkflowAgentBase):
         coder = create_react_agent(
             model=chat_model,
             tools=[self.get_bash_tool(), self.get_python_tool()],
-            prompt=coder_system_prompt,
+            prompt=self.get_worker_prompt(coder_system_prompt),
+            name="coder",
         )
 
         response = coder.invoke(state)
@@ -463,7 +465,8 @@ class CoordinatorPlannerSupervisorAgent(SupervisedWorkflowAgentBase):
         browser = create_react_agent(
             model=chat_model,
             tools=[self.get_web_browser_tool(agent_id, schema)],
-            prompt=browser_system_prompt,
+            prompt=self.get_worker_prompt(browser_system_prompt),
+            name="browser",
         )
 
         response = browser.invoke(state)
@@ -490,7 +493,8 @@ class CoordinatorPlannerSupervisorAgent(SupervisedWorkflowAgentBase):
         reporter = create_react_agent(
             model=chat_model,
             tools=self.get_reporter_tools(),
-            prompt=reporter_system_prompt,
+            prompt=self.get_worker_prompt(reporter_system_prompt),
+            name="reporter",
         )
         response = reporter.invoke(state)
         command = Command(
