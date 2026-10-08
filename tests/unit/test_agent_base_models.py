@@ -846,6 +846,7 @@ class TestCoordinatorPlannerSupervisorAgent:
             "coordinator_system_prompt": "coordinator",
             "planner_system_prompt": "planner",
             "supervisor_system_prompt": "supervisor",
+            "supervisor_completion_prompt": "completion",
             "researcher_system_prompt": "researcher",
             "coder_system_prompt": "coder",
             "browser_system_prompt": "browser",
@@ -872,7 +873,7 @@ class TestCoordinatorPlannerSupervisorAgent:
 
         agent.create_default_settings("agent-1", "test")
 
-        assert agent.agent_setting_service.create_agent_setting.call_count == 11
+        assert agent.agent_setting_service.create_agent_setting.call_count == 12
 
     def test_get_workflow_builder(self):
         builder = self._agent().get_workflow_builder("agent-1")
@@ -910,6 +911,8 @@ class TestCoordinatorPlannerSupervisorAgent:
         assert params["deep_search_mode"] is (deep_search == "True")
         assert params["collection_name"] == "kb"
         assert params["coordinator_system_prompt"] == "coordinator"
+        # agents created before this setting existed get the packaged default
+        assert "`reporter`" in params["supervisor_completion_prompt"]
         # agents created before the decision settings existed default to jev
         assert params["decision_engine"] == "jev"
         assert params["jev_integration_id"] == ""
@@ -980,7 +983,8 @@ class TestCoordinatorPlannerSupervisorAgent:
         assert command.update == {"next": END}
         agent.choose.assert_not_called()
         instructions, context = agent.is_yes.call_args.args[1:]
-        assert agent.COMPLETION_QUESTION in instructions
+        # completeness gets its own focused instructions, not the routing prompt
+        assert instructions == f"completion\n\n{agent.COMPLETION_QUESTION}"
         assert set(context) == {"query", "execution_plan", "latest_work"}
 
     def test_get_supervisor_routes_when_incomplete(self):
@@ -1467,6 +1471,7 @@ class TestVoiceMemosAgent:
             "coordinator_system_prompt": "coordinator",
             "planner_system_prompt": "planner",
             "supervisor_system_prompt": "supervisor",
+            "supervisor_completion_prompt": "completion",
             "content_analyst_system_prompt": "analyst",
             "reporter_system_prompt": "reporter",
             "messages": [HumanMessage(content="summarize")],
@@ -1501,7 +1506,7 @@ class TestVoiceMemosAgent:
 
         agent.create_default_settings("agent-1", "test")
 
-        assert agent.agent_setting_service.create_agent_setting.call_count == 9
+        assert agent.agent_setting_service.create_agent_setting.call_count == 10
 
     def _settings(self):
         return [

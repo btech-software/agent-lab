@@ -52,6 +52,7 @@ class AgentState(DecisionState):
     coordinator_system_prompt: str
     planner_system_prompt: str
     supervisor_system_prompt: str
+    supervisor_completion_prompt: str
     content_analyst_system_prompt: str
     reporter_system_prompt: str
     execution_plan: str
@@ -96,6 +97,16 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
             agent_id=agent_id,
             setting_key="supervisor_system_prompt",
             setting_value=supervisor_prompt,
+            schema=schema,
+        )
+
+        supervisor_completion_prompt = self.read_file_content(
+            f"{current_dir}/default_supervisor_completion_prompt.txt"
+        )
+        self.agent_setting_service.create_agent_setting(
+            agent_id=agent_id,
+            setting_key="supervisor_completion_prompt",
+            setting_value=supervisor_completion_prompt,
             schema=schema,
         )
 
@@ -165,6 +176,11 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
         settings_dict = {
             setting.setting_key: setting.setting_value for setting in settings
         }
+        if "supervisor_completion_prompt" not in settings_dict:
+            # agents created before this setting existed use the packaged default
+            settings_dict["supervisor_completion_prompt"] = self.read_file_content(
+                f"{Path(__file__).parent}/default_supervisor_completion_prompt.txt"
+            )
 
         template_vars = {
             "CURRENT_TIME": datetime.now().strftime(CURRENT_TIME_PATTERN),
@@ -197,6 +213,9 @@ class VoiceMemosAgent(SupervisedWorkflowAgentBase):
             ),
             "supervisor_system_prompt": self.parse_prompt_template(
                 settings_dict, "supervisor_system_prompt", template_vars
+            ),
+            "supervisor_completion_prompt": self.parse_prompt_template(
+                settings_dict, "supervisor_completion_prompt", template_vars
             ),
             "reporter_system_prompt": self.parse_prompt_template(
                 settings_dict, "reporter_system_prompt", template_vars

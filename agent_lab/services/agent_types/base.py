@@ -1017,8 +1017,11 @@ class SupervisedWorkflowAgentBase(WebAgentBase, ABC):
         }
         self.logger.info(f"Agent[{agent_id}] -> Supervisor -> Messages -> {messages}")
 
+        # completeness gets its own focused instructions: a classifier judging
+        # yes/no against the full routing prompt rejects even finished work
+        completion_prompt = state["supervisor_completion_prompt"]
         if self.is_yes(
-            state, f"{supervisor_system_prompt}\n\n{self.COMPLETION_QUESTION}", context
+            state, f"{completion_prompt}\n\n{self.COMPLETION_QUESTION}", context
         ):
             next_node = END
         else:

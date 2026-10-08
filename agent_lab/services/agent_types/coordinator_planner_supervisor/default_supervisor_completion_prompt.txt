@@ -1,0 +1,1 @@
+The work is complete when the `reporter` has delivered a final answer that directly addresses the user request and is supported by the findings.
