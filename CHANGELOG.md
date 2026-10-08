@@ -2,6 +2,58 @@
 
 <!-- version list -->
 
+## v1.17.0 (2026-10-08)
+
+### Features
+
+- Adaptive rag notebook run, jev flow test
+  ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+- Add LiteLLM setup instructions and Terraform configuration
+  ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+- Add SMTP configuration variables and update litellm environment secrets
+  ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+- Add supervisor completion prompt handling and update related system prompts in voice memos and
+  coordinator planner agents ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+- Adjusts for embeddings service with ollama (tests and notebook)
+  ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+- Adjusts for experiment_utils ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+- Embeddingsgemma-2 model for embeddings in notebooks
+  ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+- Enhance structured output handling and worker prompt integration across agents
+  ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+- Implements litellm terraform script ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+- Introduces jev as decision engine for adaptive rag
+  ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+- Logging with langfuse ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+- Oct release plan ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+- Project dependencies updates ([#390](https://github.com/btech-software/agent-lab/pull/390),
+  [`4684887`](https://github.com/btech-software/agent-lab/commit/4684887c06c0e9cd3ac8d01db510d7eb9bd647dc))
+
+
 ## v1.16.1 (2026-08-01)
 
 ### Bug Fixes
