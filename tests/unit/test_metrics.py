@@ -220,7 +220,9 @@ class TestOtelLogHandlerAttachment:
         root.setLevel(level)
 
     def test_attaches_log_handler_when_root_already_configured(self, monkeypatch):
-        monkeypatch.setattr(tracer_module, "collector_endpoint", "http://otel-collector:4318")
+        monkeypatch.setattr(
+            tracer_module, "collector_endpoint", "http://otel-collector:4318"
+        )
         monkeypatch.setattr(tracer_module, "_otel_configured", False)
         monkeypatch.setattr(tracer_module, "tracer_provider", None)
         # keep otel globals untouched by the test run
