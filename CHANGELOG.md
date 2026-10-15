@@ -2,6 +2,31 @@
 
 <!-- version list -->
 
+## v1.17.4 (2026-10-15)
+
+### Bug Fixes
+
+- Fixed versions for grafana stack and docker image
+  ([#404](https://github.com/btech-software/agent-lab/pull/404),
+  [`8d595fe`](https://github.com/btech-software/agent-lab/commit/8d595fe8aea2cd585e8f188957f4cd7f24a2d637))
+
+- Local docker compose observability stack adjusts
+  ([#404](https://github.com/btech-software/agent-lab/pull/404),
+  [`8d595fe`](https://github.com/btech-software/agent-lab/commit/8d595fe8aea2cd585e8f188957f4cd7f24a2d637))
+
+- Tempo metrics update ([#404](https://github.com/btech-software/agent-lab/pull/404),
+  [`8d595fe`](https://github.com/btech-software/agent-lab/commit/8d595fe8aea2cd585e8f188957f4cd7f24a2d637))
+
+- Update dependencies and enhance logging configuration for OTel
+  ([#404](https://github.com/btech-software/agent-lab/pull/404),
+  [`8d595fe`](https://github.com/btech-software/agent-lab/commit/8d595fe8aea2cd585e8f188957f4cd7f24a2d637))
+
+### Code Style
+
+- Apply ruff format to test_metrics ([#404](https://github.com/btech-software/agent-lab/pull/404),
+  [`8d595fe`](https://github.com/btech-software/agent-lab/commit/8d595fe8aea2cd585e8f188957f4cd7f24a2d637))
+
+
 ## v1.17.3 (2026-10-15)
 
 ### Bug Fixes
