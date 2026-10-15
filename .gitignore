@@ -230,3 +230,6 @@ Thumbs.db
 *.hcl
 *.tfstate*
 *.tfvars
+
+# Agent Breaker clone (notebook 12)
+notebooks/.agent-breaker/
