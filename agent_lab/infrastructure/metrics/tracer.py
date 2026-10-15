@@ -101,12 +101,19 @@ def _configure_otel():  # pragma: no cover - OTel exporter wiring
     logger_provider = LoggerProvider(resource=resource)
     logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
     otlp_handler = LoggingHandler(logger_provider=logger_provider)
+    otlp_handler.setLevel(logging.INFO)
     console_handler = logging.StreamHandler()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[console_handler, otlp_handler],
     )
+    # basicConfig is a silent no-op when the root logger already has
+    # handlers — app_factory.py configures it at import time. Attach the
+    # OTel handler unconditionally so application logs still reach Loki.
+    root = logging.getLogger()
+    if otlp_handler not in root.handlers:
+        root.addHandler(otlp_handler)
     return tracer_provider
 
 

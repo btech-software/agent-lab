@@ -10,13 +10,8 @@ distributor:
         http:
           endpoint: "0.0.0.0:4318"
 
-ingester:
-  max_block_duration: 5m
-  max_block_bytes: 1_000_000
-
-compactor:
-  compaction:
-    block_retention: 1h
+# Tempo 3.x: no ingester/compactor blocks — live-store serves recent queries
+# and flushes blocks; block maintenance is handled by the backend scheduler.
 
 storage:
   trace:

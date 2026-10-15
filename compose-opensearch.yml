@@ -29,14 +29,14 @@ services:
         condition: service_healthy
 
   headless-shell:
-    image: chromedp/headless-shell:latest
+    image: chromedp/headless-shell:156.0.8078.12
     networks:
       - agent-lab
     ports:
       - "9222:9222"
 
   data-prepper:
-    image: opensearchproject/data-prepper:latest
+    image: opensearchproject/data-prepper:2.16.0
     #image: opensearch-data-prepper:2.11.0-SNAPSHOT # https://github.com/opensearch-project/data-prepper/blob/main/docs/developer_guide.md#building-the-docker-image
     networks:
       - agent-lab
@@ -64,7 +64,7 @@ services:
       retries: 3
 
   opensearch:
-    image: opensearchproject/opensearch:latest
+    image: opensearchproject/opensearch:3.9.0
     networks:
       - agent-lab
     ports:
@@ -91,7 +91,7 @@ services:
       retries: 3
 
   opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:latest
+    image: opensearchproject/opensearch-dashboards:3.9.0
     networks:
       - agent-lab
     ports:
@@ -104,7 +104,7 @@ services:
         condition: service_healthy
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:0.162.0
     networks:
       - agent-lab
     ports:
@@ -120,7 +120,7 @@ services:
         condition: service_healthy
 
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.7-pg16
     ports:
       - "5432:5432"
     networks:
@@ -135,7 +135,7 @@ services:
       retries: 5
 
   postgres-setup:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.7-pg16
     networks:
       - agent-lab
     environment:
@@ -151,7 +151,7 @@ services:
         condition: service_healthy
 
   redis:
-    image: redis:alpine
+    image: redis:8.10.2-alpine
     ports:
       - "6379:6379"
     networks:
@@ -163,7 +163,7 @@ services:
       retries: 3
 
   vault:
-    image: hashicorp/vault:1.18
+    image: hashicorp/vault:2.1.2
     ports:
       - "8200:8200"
     networks:

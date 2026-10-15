@@ -1,6 +1,11 @@
+import logging
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pytest
+from opentelemetry.sdk._logs import LoggingHandler
+
+import agent_lab.infrastructure.metrics.tracer as tracer_module
 from agent_lab.infrastructure.metrics import tracing
 from agent_lab.infrastructure.metrics.tracer import ExcludePathSampler, Tracer
 from agent_lab.infrastructure.metrics.tracing import (
@@ -198,6 +203,40 @@ class TestTracer:
         fastapi_instr.instrument_app.assert_called_once_with(app)
         httpx_instr.return_value.instrument.assert_called_once()
         register_mock.assert_called_once_with([active])
+
+
+class TestOtelLogHandlerAttachment:
+    """agent_lab.app_factory configures the root logger at import time
+    (logging.basicConfig(level=DEBUG)), which makes _configure_otel's
+    logging.basicConfig a silent no-op. The OTel LoggingHandler must still be
+    attached, or application logs never reach Loki via the collector."""
+
+    @pytest.fixture(autouse=True)
+    def _preserve_root_logging(self):
+        root = logging.getLogger()
+        handlers, level = root.handlers[:], root.level
+        yield
+        root.handlers[:] = handlers
+        root.setLevel(level)
+
+    def test_attaches_log_handler_when_root_already_configured(self, monkeypatch):
+        monkeypatch.setattr(
+            tracer_module, "collector_endpoint", "http://otel-collector:4318"
+        )
+        monkeypatch.setattr(tracer_module, "_otel_configured", False)
+        monkeypatch.setattr(tracer_module, "tracer_provider", None)
+        # keep otel globals untouched by the test run
+        monkeypatch.setattr(tracer_module, "trace", MagicMock())
+        monkeypatch.setattr(tracer_module, "metrics", MagicMock())
+
+        logging.basicConfig(level=logging.DEBUG)  # simulates app_factory import
+
+        tracer_module._configure_otel()
+
+        log_handlers = [
+            h for h in logging.getLogger().handlers if isinstance(h, LoggingHandler)
+        ]
+        assert log_handlers, "OTel LoggingHandler not attached to the root logger"
 
 
 def test_module_state_restored():

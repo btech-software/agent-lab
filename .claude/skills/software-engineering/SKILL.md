@@ -1,6 +1,6 @@
 ---
 name: software-engineering
-description: Use when the user asks about architecture, running, testing, linting, or building the project, about code conventions, about adding or registering agents, MCP tools, prompts, or registrars (the @discoverable_agent / @RegisterMcp* decorator framework and its discovery/bootstrap path), or about the agent simulation suites (scenario, Langfuse, LangWatch) and their observability platform integrations.
+description: Use when the user asks about architecture, running, testing, linting, or building the project, about code conventions, about adding or registering agents, MCP tools, prompts, or registrars (the @discoverable_agent / @RegisterMcp* decorator framework and its discovery/bootstrap path), about the agent simulation suites (scenario, Langfuse, LangWatch) and their observability platform integrations, or when upgrading pinned container images or dependencies.
 ---
 
 # Software Engineering
@@ -144,6 +144,27 @@ docker compose build app && docker compose up -d app
 ```
 
 **Note:** The backend runs inside a Docker container. Local changes to Python files in `agent_lab/` are NOT reflected until the container is rebuilt. Always rebuild after modifying backend code.
+
+## Upgrading Pinned Images & Dependencies
+
+Applies to `compose-grafana.yml` and `docker/app/Dockerfile`. Proven procedure — follow it end to end; skipping the verification step has already shipped silent breakage (Grafana 13 vs Tempo 2.4.2).
+
+1. **Discover the latest stable from authoritative sources.** Never trust a `latest` tag — it is often stale or wrong-channel:
+   - Docker Hub tags API (`https://hub.docker.com/v2/repositories/<org>/<repo>/tags/?page_size=100`): filter strict semver, drop `rc|beta|main-*|test` and per-arch suffixes (`-amd64`, `-arm64`). For variant tags prefer the exact patch (`redis:8.10.2-alpine`, `python:3.12.15-slim`).
+   - Verify what `latest` actually points to by comparing digests: `grafana/tempo:latest` was v3.0.0 while v3.1.0 was the newest release; `chromedp/headless-shell:latest` pointed at a Chrome *dev* build while its `stable` tag matched `156.0.8078.12`. Use `docker buildx imagetools inspect <image:tag>` for the index digest.
+   - Some projects bury release tags under per-commit builds (grafana/loki publishes hundreds of `main-*` tags) — take the version from GitHub `releases/latest`, then confirm the plain-version tag exists on the registry.
+   - Locked macOS keychain blocks ghcr: get the digest anonymously — `curl "https://ghcr.io/token?scope=repository:<org>/<repo>:pull"`, then HEAD `https://ghcr.io/v2/<org>/<repo>/manifests/<tag>` and read `Docker-Content-Digest`.
+2. **Pin `tag@digest`** (the index digest pins the multi-arch manifest list — identical content on arm64 and amd64). Match the style already used in the file you are editing.
+3. **Respect app constraints:** the Python minor is pinned by `pyproject.toml`/`uv.lock` — bump only the patch (`3.12-slim` → `3.12.15-slim`), never the minor, without a separate migration. For subprocess binaries the container ships (ffmpeg 8→9), run the binary once inside the rebuilt container.
+4. **Recreate, then verify per pipeline** — `ps` status alone proves nothing:
+   - Back up container-local state first; the stack has no volumes. `docker exec agent-lab-postgres-1 pg_dumpall -U postgres > backup.sql` and `docker cp agent-lab-grafana-1:/var/lib/grafana/grafana.db .`. Recreating the grafana container resets admin back to `admin:admin`.
+   - `docker compose -f compose-grafana.yml pull && up -d`, then check every service's uptime in `ps`: compose does **not** recreate dependents when only a dependency's image changed — force with `up -d --force-recreate app`.
+   - Major image bumps can reject the existing config file — read the project's migration guide first. Tempo 2.x → 3.x (monolithic): delete the `ingester:` and `compactor:` blocks, everything else carries over; Docker Hub `latest` lagged the real release, so pin the exact version.
+   - Traces: probe the app, confirm `tempo_distributor_spans_received_total` moved (`curl localhost:3200/metrics`), then search with **explicit** start/end (`/api/search?q={resource.service.name="Agent-Lab"}&start=<epoch>&end=<epoch>`) — tempo 3.x live-store search lags 30–60s after ingest, so an empty immediate result is not a failure.
+   - Metrics: confirm the app's own OTel metric names (`gen_ai_client_token_usage_*`, `http_server_duration_*`) exist in prometheus — a nonzero `prometheus_tsdb_head_series` can be prometheus self-scraping, not remote-write.
+   - Logs: emit a probe record via `LoggingHandler` bound to a `LoggerProvider` with an `OTLPLogExporter` (endpoint `.../v1/logs`) from the app container's venv python, then query loki `{service_name=~".+"}`. A plain `StreamHandler` never enters the OTel pipeline — the probe must use `LoggingHandler`.
+   - Distroless images (otelcol, tempo) have no shell — `docker exec ... sh` fails. Probe via host-exposed ports or from a sibling container (the app image has `/agent-lab/.venv/bin/python`).
+   - Grep container logs for errors, but verify against the upstream tracker before declaring failure: tempo 3.x monolithic logs `error calling scheduler ... no jobs found` on every poll (grafana/tempo#7403, harmless). Greps also false-positive on benign lines (`errors=false`, migration logs naming an `error_string` column).
 
 ## Agent Simulations
 
