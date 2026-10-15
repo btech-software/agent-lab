@@ -584,7 +584,7 @@ wheels = [
 
 [[package]]
 name = "btech-agent-lab"
-version = "1.17.2"
+version = "1.17.3"
 source = { editable = "." }
 dependencies = [
     { name = "browser-use" },

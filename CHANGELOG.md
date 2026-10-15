@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.17.3 (2026-10-15)
+
+### Bug Fixes
+
+- Issue 382 closing ([#403](https://github.com/btech-software/agent-lab/pull/403),
+  [`fbdba88`](https://github.com/btech-software/agent-lab/commit/fbdba88856c0efe65141e4561c74ab484f3dc84d))
+
+
 ## v1.17.2 (2026-10-15)
 
 ### Bug Fixes
