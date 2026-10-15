@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.17.2 (2026-10-15)
+
+### Bug Fixes
+
+- Dependabot adjusts ([#395](https://github.com/btech-software/agent-lab/pull/395),
+  [`ed28306`](https://github.com/btech-software/agent-lab/commit/ed2830605a72f7bf9bf10deb014b83566a2b2d90))
+
+
 ## v1.17.1 (2026-10-08)
 
 ### Bug Fixes
