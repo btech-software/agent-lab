@@ -135,7 +135,7 @@ class TestBuildMcpServer:
         mcp = build_mcp_server(container, [])
 
         assert mcp.icons[0].src == "http://localhost:8000/static/logo.svg"
-        assert mcp.icons[0].mimeType == "image/svg+xml"
+        assert mcp.icons[0].mime_type == "image/svg+xml"
 
 
 class TestGetMcpSchema:
