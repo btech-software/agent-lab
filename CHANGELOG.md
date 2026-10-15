@@ -2,6 +2,33 @@
 
 <!-- version list -->
 
+## v1.17.5 (2026-10-15)
+
+### Bug Fixes
+
+- Create SECURITY.md for security policy and reporting
+  ([#405](https://github.com/btech-software/agent-lab/pull/405),
+  [`618cff0`](https://github.com/btech-software/agent-lab/commit/618cff0bf8d4689902a93bd7c4ff9eef80c94bd6))
+
+- Update dependencies and enhance logging configuration for OTel
+  ([#405](https://github.com/btech-software/agent-lab/pull/405),
+  [`618cff0`](https://github.com/btech-software/agent-lab/commit/618cff0bf8d4689902a93bd7c4ff9eef80c94bd6))
+
+### Build System
+
+- **deps**: Bump fastmcp from 3.4.5 to 4.1.0
+  ([#402](https://github.com/btech-software/agent-lab/pull/402),
+  [`3cb5195`](https://github.com/btech-software/agent-lab/commit/3cb51952a506a068d00806ab4fc78444f1850665))
+
+- **deps**: Bump langwatch-scenario from 0.7.26 to 1.6.0
+  ([#397](https://github.com/btech-software/agent-lab/pull/397),
+  [`3a4a2a0`](https://github.com/btech-software/agent-lab/commit/3a4a2a0d142d3a66e43035a115e125d3b663c675))
+
+- **deps**: Bump the uv-minor-patch group across 1 directory with 26 updates
+  ([#401](https://github.com/btech-software/agent-lab/pull/401),
+  [`7f1ab54`](https://github.com/btech-software/agent-lab/commit/7f1ab54c02d49e022fda81fa4721c4f45e25d251))
+
+
 ## v1.17.4 (2026-10-15)
 
 ### Bug Fixes
