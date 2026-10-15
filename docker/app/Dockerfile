@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12.15-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
 ENV SERVICE_NAME=Agent-Lab
 ENV SERVICE_VERSION=1.17.3
@@ -9,10 +9,10 @@ ENV WORKERS=1
 
 WORKDIR /agent-lab
 
-COPY --from=mwader/static-ffmpeg:8.1.2@sha256:33f770f812cbfc3de96c547157fc9faf8bd95a36481753439ffa761045167585 /ffmpeg /usr/local/bin/
+COPY --from=mwader/static-ffmpeg:9.0.2-1@sha256:f5d100184884eb3e82b0eb14bb5ebf98da99826ac824989720297fb9ef21c822 /ffmpeg /usr/local/bin/
 
 COPY pyproject.toml uv.lock /agent-lab/
-RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
+RUN --mount=from=ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336,source=/uv,target=/bin/uv \
     uv sync --no-build --frozen --no-dev --no-install-project \
     && rm -rf /tmp/* /var/tmp/* \
     && groupadd -r agent-lab \

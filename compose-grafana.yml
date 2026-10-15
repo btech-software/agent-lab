@@ -23,14 +23,14 @@ services:
         condition: service_healthy
 
   headless-shell:
-    image: chromedp/headless-shell:latest
+    image: chromedp/headless-shell:156.0.8078.12
     networks:
       - agent-lab
     ports:
       - "9222:9222"
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:0.162.0
     networks:
       - agent-lab
     ports:
@@ -48,7 +48,7 @@ services:
         condition: service_started
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.15.0
     networks:
       - agent-lab
     ports:
@@ -58,7 +58,7 @@ services:
     command: [ "--config.file=/etc/prometheus/prometheus.yml", "--web.enable-remote-write-receiver" ]
 
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.7.8
     networks:
       - agent-lab
     ports:
@@ -76,7 +76,7 @@ services:
 
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.2.4
     networks:
       - agent-lab
     ports:
@@ -85,7 +85,7 @@ services:
       - ./otel/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
 
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.7-pg16
     ports:
       - "5432:5432"
     networks:
@@ -100,7 +100,7 @@ services:
       retries: 5
 
   postgres-setup:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.7-pg16
     networks:
       - agent-lab
     environment:
@@ -116,7 +116,7 @@ services:
         condition: service_healthy
 
   redis:
-    image: redis:alpine
+    image: redis:8.10.2-alpine
     ports:
       - "6379:6379"
     networks:
@@ -128,7 +128,7 @@ services:
       retries: 3
 
   vault:
-    image: hashicorp/vault:1.18
+    image: hashicorp/vault:2.1.2
     ports:
       - "8200:8200"
     networks:
