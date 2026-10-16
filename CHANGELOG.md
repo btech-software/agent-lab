@@ -2,6 +2,18 @@
 
 <!-- version list -->
 
+## v1.17.6 (2026-10-16)
+
+### Bug Fixes
+
+- Adjusts security policy doc ([#406](https://github.com/btech-software/agent-lab/pull/406),
+  [`e1ca183`](https://github.com/btech-software/agent-lab/commit/e1ca18347c9c0754e2a4736f95a27bf8c3f1dae2))
+
+- Provision elastic cluster for observability
+  ([#406](https://github.com/btech-software/agent-lab/pull/406),
+  [`e1ca183`](https://github.com/btech-software/agent-lab/commit/e1ca18347c9c0754e2a4736f95a27bf8c3f1dae2))
+
+
 ## v1.17.5 (2026-10-15)
 
 ### Bug Fixes
