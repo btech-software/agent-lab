@@ -191,8 +191,13 @@ kubectl --namespace vault exec vault-0 -- vault operator unseal $VAULT_UNSEAL_KE
 
 Please determine a <langwatch_fqdn> for accessing LangWatch web UI, example: langwatch.my-domain.com
 
+Two alternative variants are provided (both deploy to the `langwatch` namespace, apply only one). Since chart 3.9.0, SSO providers require a LangWatch Enterprise license:
+
+- `oidc-sso/`: chart 3.8.0 with Keycloak SSO (requires the realm from `12_agent-lab-auth-realm`).
+- `latest/`: latest chart with email/password sign-in.
+
 ```bash
-cd terraform/09_langwatch-instance/
+cd terraform/14_langwatch-instance/latest/   # or oidc-sso/
 terraform init
 terraform apply
 ```
