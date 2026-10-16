@@ -2,6 +2,21 @@
 
 <!-- version list -->
 
+## v1.17.7 (2026-10-16)
+
+### Bug Fixes
+
+- Documentation update ([#407](https://github.com/btech-software/agent-lab/pull/407),
+  [`2b960a7`](https://github.com/btech-software/agent-lab/commit/2b960a7fe886310bcc593d4132613a3cb07ef63c))
+
+- Langwatch and documentation update ([#407](https://github.com/btech-software/agent-lab/pull/407),
+  [`2b960a7`](https://github.com/btech-software/agent-lab/commit/2b960a7fe886310bcc593d4132613a3cb07ef63c))
+
+- Langwatch terraform refactoring, sso support pinned
+  ([#407](https://github.com/btech-software/agent-lab/pull/407),
+  [`2b960a7`](https://github.com/btech-software/agent-lab/commit/2b960a7fe886310bcc593d4132613a3cb07ef63c))
+
+
 ## v1.17.6 (2026-10-16)
 
 ### Bug Fixes
