@@ -192,11 +192,15 @@ It ships with Helm charts (`charts/`) for Kubernetes and Terraform scripts (`ter
 
 ## Documentation
 
-Documentation is organized around how you use Agent-Lab:
+The complete documentation lives in [`doc/`](https://github.com/btech-software/agent-lab/blob/main/doc/README.md),
+organized around how you use Agent-Lab (in the spirit of the [Diátaxis](https://diataxis.fr/) framework):
 
-- **Developer's Guide** — for developers building agents and applications on Agent-Lab (as a library or in-repo): setup, the extension model, and development practices. See the [Developer's Guide](https://github.com/btech-software/agent-lab/blob/main/doc/DEV_GUIDE.md).
-- **Researcher's Guide** — for researchers running experiments: the MCP server, managing agents, tuning prompts, and prototyping new agents in Jupyter. See the [Researcher's Guide](https://github.com/btech-software/agent-lab/blob/main/doc/RESEARCHER_GUIDE.md).
-- **Testing & Simulations** — the integration and simulation suites and LLM-as-judge evaluation. See the [testing guide](https://github.com/btech-software/agent-lab/blob/main/doc/TESTS.md).
+- **[Your first agent](https://github.com/btech-software/agent-lab/blob/main/doc/TUTORIAL.md)** — scaffold, define, call over REST, watch the trace, expose an MCP tool: a complete 15-minute tutorial.
+- **[Developer's Guide](https://github.com/btech-software/agent-lab/blob/main/doc/DEV_GUIDE.md)** — the flagship guide: two development models, configuration, DI, building agents, and every extension point.
+- **[Researcher's Guide](https://github.com/btech-software/agent-lab/blob/main/doc/RESEARCHER_GUIDE.md)** — notebooks, experiments, and prototyping new agent behaviors.
+- **[Testing & Simulations](https://github.com/btech-software/agent-lab/blob/main/doc/TESTS.md)** — the integration suite (testcontainers) and LLM-as-judge agent simulations.
+- **Reference** — [REST API](https://github.com/btech-software/agent-lab/blob/main/doc/REST_API.md) · [Configuration](https://github.com/btech-software/agent-lab/blob/main/doc/CONFIGURATION.md) · [Entity Domain Model](https://github.com/btech-software/agent-lab/blob/main/doc/DOMAIN.md).
+- **Build & Operate** — [MCP Server](https://github.com/btech-software/agent-lab/blob/main/doc/MCP.md) · [Observability](https://github.com/btech-software/agent-lab/blob/main/doc/OTEL.md) · [Deployment](https://github.com/btech-software/agent-lab/blob/main/doc/SETUP.md) · [Auth with Keycloak](https://github.com/btech-software/agent-lab/blob/main/doc/KEYCLOAK.md) · [Secrets with Vault](https://github.com/btech-software/agent-lab/blob/main/doc/VAULT.md).
 
 ---
 

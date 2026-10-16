@@ -152,8 +152,10 @@ resource "helm_release" "langwatch" {
   name       = "langwatch"
   repository = "https://langwatch.github.io/langwatch/"
   chart      = "langwatch"
-  version    = "3.5.0"
-  namespace  = kubernetes_namespace_v1.langwatch.metadata[0].name
+  # Pinned: 3.8.0 is the last chart before SSO became Enterprise-license gated
+  # (3.9.0+ ignores the provider without a license and falls back to email).
+  version   = "3.8.0"
+  namespace = kubernetes_namespace_v1.langwatch.metadata[0].name
 
   values = [
     yamlencode({
@@ -169,6 +171,13 @@ resource "helm_release" "langwatch" {
         http = {
           publicUrl = "https://${var.langwatch_fqdn}"
           baseHost  = "https://${var.langwatch_fqdn}"
+        }
+
+        # Requests sized for the single-node dev cluster (chart default 2Gi).
+        resources = {
+          requests = {
+            memory = "1Gi"
+          }
         }
 
         # Keycloak SSO (SSO-only). LangWatch has no generic-OIDC provider, so we
@@ -196,6 +205,40 @@ resource "helm_release" "langwatch" {
             }
           }
         }
+      }
+
+      workers = {
+        resources = {
+          requests = {
+            memory = "1Gi"
+          }
+        }
+      }
+
+      # One evaluation worker (~2.1Gi of local models each). CPU_COUNT pins the
+      # pool: on cgroup v2 nodes 3.8.0 otherwise forks one worker per host core.
+      langevals = {
+        resources = {
+          requests = {
+            cpu    = "500m"
+            memory = "2Gi"
+          }
+          limits = {
+            cpu    = "1"
+            memory = "4Gi"
+          }
+        }
+        extraEnvs = [
+          {
+            name  = "CPU_COUNT"
+            value = "1"
+          }
+        ]
+      }
+
+      # In-product assistant; not needed for tracing/simulations.
+      langyagent = {
+        chartManaged = false
       }
 
       ingress = {
@@ -227,9 +270,12 @@ resource "helm_release" "langwatch" {
       }
 
       # 3.x replaced OpenSearch with a chart-managed ClickHouse. Keep hot storage
-      # modest for the single-node dev cluster (chart default is 50Gi).
+      # modest for the single-node dev cluster (chart default is 50Gi, 2 CPU /
+      # 4Gi; the image auto-tunes ClickHouse from cpu/memory).
       clickhouse = {
         chartManaged = true
+        cpu          = 1
+        memory       = "2Gi"
         storage = {
           size = "10Gi"
         }
