@@ -82,6 +82,7 @@ resource "helm_release" "elastic" {
   name       = "elastic"
   repository = "https://helm.elastic.co"
   chart      = "eck-stack"
+  version    = "0.20.0"
   namespace  = kubernetes_namespace_v1.elastic.metadata[0].name
 
   values = [var.kibana_enabled ? yamlencode({
@@ -126,7 +127,8 @@ resource "helm_release" "elastic" {
     }
 
     eck-apm-server = {
-      enabled = true
+      enabled          = true
+      fullnameOverride = "apm-server"
 
       elasticsearchRef = {
         name = "elasticsearch"
@@ -134,6 +136,17 @@ resource "helm_release" "elastic" {
 
       kibanaRef = {
         name = "kibana"
+      }
+
+      http = {
+        service = {
+          metadata = {
+            annotations = {
+              "traefik.ingress.kubernetes.io/service.serversscheme"    = "https"
+              "traefik.ingress.kubernetes.io/service.serverstransport" = local.traefik_servers_transport
+            }
+          }
+        }
       }
     }
   }) : yamlencode({
@@ -144,10 +157,22 @@ resource "helm_release" "elastic" {
     }
 
     eck-apm-server = {
-      enabled = true
+      enabled          = true
+      fullnameOverride = "apm-server"
 
       elasticsearchRef = {
         name = "elasticsearch"
+      }
+
+      http = {
+        service = {
+          metadata = {
+            annotations = {
+              "traefik.ingress.kubernetes.io/service.serversscheme"    = "https"
+              "traefik.ingress.kubernetes.io/service.serverstransport" = local.traefik_servers_transport
+            }
+          }
+        }
       }
     }
   })]
@@ -246,6 +271,51 @@ resource "kubernetes_ingress_v1" "kibana" {
               name = "kibana-kb-http"
               port {
                 number = 5601
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [time_sleep.wait_for_elastic, kubernetes_manifest.elastic_servers_transport]
+}
+
+# Custom Traefik Ingress for APM Server (OTLP endpoint for the remote OTel collector)
+resource "kubernetes_ingress_v1" "apm" {
+  metadata {
+    name      = "apm"
+    namespace = kubernetes_namespace_v1.elastic.metadata[0].name
+
+    annotations = {
+      "cert-manager.io/cluster-issuer"                   = "letsencrypt-prod"
+      "traefik.ingress.kubernetes.io/router.entrypoints" = "websecure"
+      "traefik.ingress.kubernetes.io/router.tls"         = "true"
+    }
+  }
+
+  spec {
+    ingress_class_name = "traefik"
+
+    tls {
+      hosts       = [var.apm_fqdn]
+      secret_name = "apm-tls"
+    }
+
+    rule {
+      host = var.apm_fqdn
+
+      http {
+        path {
+          path      = "/"
+          path_type = "Prefix"
+
+          backend {
+            service {
+              name = "apm-server-apm-http"
+              port {
+                number = 8200
               }
             }
           }
