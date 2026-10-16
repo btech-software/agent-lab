@@ -8,6 +8,11 @@ variable "kibana_fqdn" {
   description = "FQDN for Kibana access (e.g., kibana.local or a public domain)"
 }
 
+variable "apm_fqdn" {
+  type        = string
+  description = "FQDN for APM Server access (OTLP endpoint used by the OTel collector in the remote cluster)"
+}
+
 variable "kibana_enabled" {
   type        = bool
   default     = true
