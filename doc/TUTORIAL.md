@@ -19,6 +19,7 @@
 - [5. Talk to your agent over REST](#5-talk-to-your-agent-over-rest)
 - [6. Watch the trace](#6-watch-the-trace)
 - [7. Meet it in an MCP client](#7-meet-it-in-an-mcp-client)
+- [8. Configure a language model](#8-configure-a-language-model)
 - [What's next?](#whats-next)
 
 ---
@@ -35,8 +36,9 @@ agent instance over REST, send it a message, and watch the framework's traces.
 - **Python 3.12+** and [uv](https://docs.astral.sh/uv/) (`pip install uv`)
 - **Docker** (or another container runtime), running
 
-No API keys are needed for this tutorial — the echo agent doesn't call an LLM. LLM-backed
-agents come next (see [What's next?](#whats-next)).
+No API keys are needed to run the echo agent — it doesn't call an LLM. When you're
+ready, [section 8](#8-configure-a-language-model) configures a real one over REST;
+building LLM-backed agents comes next (see [What's next?](#whats-next)).
 
 ---
 
@@ -252,6 +254,105 @@ npx @modelcontextprotocol/inspector
 Connect to `http://localhost:18000/mcp` (Streamable HTTP), list the tools, and call
 `my_agent_app_hello_tool`. The same server works with Claude Desktop and any MCP
 client — see the [MCP Server guide](MCP.md).
+
+---
+
+## 8. Configure a language model
+
+The echo agent never calls an LLM. Agents that do resolve a **language model** at
+request time: an **integration** holds the provider connection — endpoint and API
+key, with the secret stored in [Vault](VAULT.md) under `integration_<id>` — and a
+**language model** binds a model tag to that integration. Both are runtime data,
+created over REST; no code changes, no redeploy.
+
+Create an **integration** first. `openai_api_v1` speaks the OpenAI API, so it covers
+OpenAI itself, any OpenAI-compatible gateway, and local servers like Ollama (the
+other types — `anthropic_api_v1`, `xai_api_v1`, `typesafe_api_v1` — talk to their
+native APIs):
+
+```bash
+curl -s -X POST http://localhost:18000/integrations/create \
+  -H "Authorization: Bearer not-applicable" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "integration_type": "openai_api_v1",
+        "api_endpoint": "https://api.openai.com/v1",
+        "api_key": "sk-..."
+      }' | jq
+```
+
+Then bind a **language model** to it. Creating one seeds default settings —
+`embeddings` (`text-embedding-3-large` for `openai_api_v1` integrations) and
+`structured_output_method` (`default`) — which you can override with
+`/llms/update_setting`:
+
+```bash
+curl -s -X POST http://localhost:18000/llms/create \
+  -H "Authorization: Bearer not-applicable" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "integration_id": "<integration_id>",
+        "language_model_tag": "gpt-4o-mini"
+      }' | jq
+```
+
+Pass the returned `id` as `language_model_id` when creating an agent (see the
+[REST API reference](REST_API.md)). For `openai_api_v1` the integration's endpoint
+and key are used verbatim as the OpenAI base URL and API key.
+
+**Self-hosted gateway.** The framework repository ships a **LiteLLM gateway** as a
+reference deployment (`terraform/17_litellm-instance/`, provisioned in
+[Deployment](SETUP.md#provision-dependencies)): an OpenAI-compatible proxy with
+virtual keys, spend tracking and an admin UI at `/ui`. Point the integration's
+`api_endpoint` at the gateway, mint a **virtual key** in the UI and use it as the
+`api_key`. The models the gateway exposes are configured on the Terraform side
+(`var.models`); switching an agent to the gateway is just a new integration plus
+language model — agent code never changes.
+
+**Local models with Ollama.** [Ollama](https://ollama.com) serves an
+OpenAI-compatible API on port 11434. Pull a model, then point an integration at it —
+the `api_key` can be any non-empty string (`ollama` is the convention), and
+`host.docker.internal` is how the compose app reaches the Ollama on your host
+(Docker Desktop; on Linux use the host IP):
+
+```bash
+ollama pull gpt-oss:20b
+
+curl -s -X POST http://localhost:18000/integrations/create \
+  -H "Authorization: Bearer not-applicable" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "integration_type": "openai_api_v1",
+        "api_endpoint": "http://host.docker.internal:11434/v1",
+        "api_key": "ollama"
+      }' | jq
+```
+
+Create the language model with `"language_model_tag": "gpt-oss:20b"` — the tag must
+match the pulled model. Two settings matter for local servers:
+
+```bash
+# Ollama doesn't serve the OpenAI embeddings default — pin one it does
+curl -s -X POST http://localhost:18000/llms/update_setting \
+  -H "Authorization: Bearer not-applicable" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "language_model_id": "<language_model_id>",
+        "setting_key": "embeddings",
+        "setting_value": "bge-m3"
+      }' | jq
+
+# OpenAI-compatible servers don't enforce tool_choice; gpt-oss on Ollama
+# works reliably with function calling
+curl -s -X POST http://localhost:18000/llms/update_setting \
+  -H "Authorization: Bearer not-applicable" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "language_model_id": "<language_model_id>",
+        "setting_key": "structured_output_method",
+        "setting_value": "function_calling"
+      }' | jq
+```
 
 ---
 
