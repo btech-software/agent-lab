@@ -127,6 +127,7 @@ against the [registry](DEV_GUIDE.md#register-the-agent-with-discoverable_agent).
 
 ```bash
 curl -s -X POST http://localhost:18000/agents/create \
+  -H "Authorization: Bearer not-applicable" \
   -H "Content-Type: application/json" \
   -d '{
         "agent_name": "support-agent-1",
@@ -140,6 +141,7 @@ curl -s -X POST http://localhost:18000/agents/create \
 
 ```bash
 curl -s -X POST http://localhost:18000/messages/post \
+  -H "Authorization: Bearer not-applicable" \
   -H "Content-Type: application/json" \
   -d '{
         "agent_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
@@ -155,6 +157,7 @@ live here — see the [Entity Domain Model](DOMAIN.md)):
 
 ```bash
 curl -s -X POST http://localhost:18000/agents/update_setting \
+  -H "Authorization: Bearer not-applicable" \
   -H "Content-Type: application/json" \
   -d '{
         "agent_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
