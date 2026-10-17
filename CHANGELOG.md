@@ -2,6 +2,26 @@
 
 <!-- version list -->
 
+## v1.17.8 (2026-10-17)
+
+### Bug Fixes
+
+- Doc adjusts 2 ([#408](https://github.com/btech-software/agent-lab/pull/408),
+  [`eb1d838`](https://github.com/btech-software/agent-lab/commit/eb1d8381d4d29eb3cc991b1de5c6cf7b415471de))
+
+- Documentation adjusts in tutorial ([#408](https://github.com/btech-software/agent-lab/pull/408),
+  [`eb1d838`](https://github.com/btech-software/agent-lab/commit/eb1d8381d4d29eb3cc991b1de5c6cf7b415471de))
+
+- Documentation updat 2e ([#408](https://github.com/btech-software/agent-lab/pull/408),
+  [`eb1d838`](https://github.com/btech-software/agent-lab/commit/eb1d8381d4d29eb3cc991b1de5c6cf7b415471de))
+
+- Documentation update 3 ([#408](https://github.com/btech-software/agent-lab/pull/408),
+  [`eb1d838`](https://github.com/btech-software/agent-lab/commit/eb1d8381d4d29eb3cc991b1de5c6cf7b415471de))
+
+- Documentation update 4 ([#408](https://github.com/btech-software/agent-lab/pull/408),
+  [`eb1d838`](https://github.com/btech-software/agent-lab/commit/eb1d8381d4d29eb3cc991b1de5c6cf7b415471de))
+
+
 ## v1.17.7 (2026-10-16)
 
 ### Bug Fixes
