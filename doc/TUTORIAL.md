@@ -182,6 +182,7 @@ Create one:
 
 ```bash
 curl -s -X POST http://localhost:18000/agents/create \
+  -H "Authorization: Bearer not-applicable" \
   -H "Content-Type: application/json" \
   -d '{"agent_name": "my-first-agent", "agent_type": "my_agent_app_echo"}' | jq
 ```
@@ -190,6 +191,7 @@ Copy the `id` from the response, then send it a message:
 
 ```bash
 curl -s -X POST http://localhost:18000/messages/post \
+  -H "Authorization: Bearer not-applicable" \
   -H "Content-Type: application/json" \
   -d '{
         "agent_id": "<agent_id>",
