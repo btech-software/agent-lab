@@ -2,6 +2,56 @@
 
 <!-- version list -->
 
+## v1.17.9 (2026-10-25)
+
+### Bug Fixes
+
+- Mcp json adjusts ([#419](https://github.com/btech-software/agent-lab/pull/419),
+  [`def701b`](https://github.com/btech-software/agent-lab/commit/def701b6112ec24870b745901ec42a70031dab3f))
+
+- Update LiteLLM chart and image versions; enhance model configuration
+  ([#419](https://github.com/btech-software/agent-lab/pull/419),
+  [`def701b`](https://github.com/btech-software/agent-lab/commit/def701b6112ec24870b745901ec42a70031dab3f))
+
+### Build System
+
+- **deps**: Bump aiohttp from 3.14.3 to 3.14.4
+  ([#419](https://github.com/btech-software/agent-lab/pull/419),
+  [`def701b`](https://github.com/btech-software/agent-lab/commit/def701b6112ec24870b745901ec42a70031dab3f))
+
+- **deps**: Bump fastapi-keycloak-middleware from 1.6.0 to 2.0.0
+  ([#419](https://github.com/btech-software/agent-lab/pull/419),
+  [`def701b`](https://github.com/btech-software/agent-lab/commit/def701b6112ec24870b745901ec42a70031dab3f))
+
+- **deps**: Bump filelock from 3.29.7 to 4.2.1
+  ([#419](https://github.com/btech-software/agent-lab/pull/419),
+  [`def701b`](https://github.com/btech-software/agent-lab/commit/def701b6112ec24870b745901ec42a70031dab3f))
+
+- **deps**: Bump filelock from 3.29.7 to 4.2.1
+  ([#416](https://github.com/btech-software/agent-lab/pull/416),
+  [`f8cf485`](https://github.com/btech-software/agent-lab/commit/f8cf4855b6c1152b09dcdf4a53bb0559a4b9e52d))
+
+- **deps**: Bump langgraph-checkpoint-postgres from 3.1.2 to 3.1.3
+  ([#419](https://github.com/btech-software/agent-lab/pull/419),
+  [`def701b`](https://github.com/btech-software/agent-lab/commit/def701b6112ec24870b745901ec42a70031dab3f))
+
+- **deps**: Bump pillow from 12.3.0 to 13.0.0
+  ([#419](https://github.com/btech-software/agent-lab/pull/419),
+  [`def701b`](https://github.com/btech-software/agent-lab/commit/def701b6112ec24870b745901ec42a70031dab3f))
+
+- **deps**: Bump pypdf from 6.20.1 to 6.21.2
+  ([#419](https://github.com/btech-software/agent-lab/pull/419),
+  [`def701b`](https://github.com/btech-software/agent-lab/commit/def701b6112ec24870b745901ec42a70031dab3f))
+
+- **deps**: Bump the uv-minor-patch group across 1 directory with 14 updates
+  ([#418](https://github.com/btech-software/agent-lab/pull/418),
+  [`74bfedc`](https://github.com/btech-software/agent-lab/commit/74bfedc6fb473caff23d3a0d49273c37a1043f67))
+
+- **deps**: Bump virtualenv from 21.14.5 to 21.14.13
+  ([#419](https://github.com/btech-software/agent-lab/pull/419),
+  [`def701b`](https://github.com/btech-software/agent-lab/commit/def701b6112ec24870b745901ec42a70031dab3f))
+
+
 ## v1.17.8 (2026-10-17)
 
 ### Bug Fixes
