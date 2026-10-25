@@ -206,16 +206,21 @@ resource "helm_release" "litellm" {
 
       proxy_config = {
         model_list = [
-          for name, m in var.models : {
-            model_name = name
-            litellm_params = merge(
-              {
-                model    = "openai/${m.model}"
-                api_base = m.api_base != "" && m.api_base != null ? m.api_base : var.upstream_api_base
-              },
-              m.api_key != "" ? { api_key = "os.environ/UPSTREAM_API_KEY_${upper(replace(name, "/[^A-Za-z0-9_]/", "_"))}" } : {}
-            )
-          }
+          for name, m in var.models : merge(
+            {
+              model_name = name
+              litellm_params = merge(
+                {
+                  model    = "${m.provider}/${m.model}"
+                  api_base = m.api_base != "" && m.api_base != null ? m.api_base : var.upstream_api_base
+                },
+                m.api_key != "" ? { api_key = "os.environ/UPSTREAM_API_KEY_${upper(replace(name, "/[^A-Za-z0-9_]/", "_"))}" } : {}
+              )
+            },
+            # mode = "evaluation" publishes the model group on /v1/decisions and
+            # /v1/systemone and makes the Admin UI list it as a decision model.
+            m.mode != "" ? { model_info = { mode = m.mode } } : {}
+          )
         ]
 
         # langfuse_otel exports via LiteLLM's OTLP pipeline to
