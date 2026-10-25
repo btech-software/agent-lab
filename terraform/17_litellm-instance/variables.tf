@@ -17,14 +17,14 @@ variable "pg_image" {
 
 variable "litellm_chart_version" {
   type        = string
-  default     = "1.103.2"
-  description = "litellm-helm chart version (OCI: ghcr.io/berriai/litellm-helm)"
+  default     = "1.106.2"
+  description = "litellm-helm chart version (OCI: ghcr.io/berriai/litellm-helm). Do NOT use 1.107.0: that release was compromised (supply-chain attack, pulled from PyPI/GHCR/Docker Hub on 2026-10-21)."
 }
 
 variable "litellm_image_tag" {
   type        = string
-  default     = "v1.103.2"
-  description = "LiteLLM proxy image tag (pinned; chart appVersion is 'latest' and must not be relied on)"
+  default     = "v1.106.2"
+  description = "LiteLLM proxy image tag (pinned; chart appVersion is 'latest' and must not be relied on). Do NOT use v1.107.0 or :latest/:main-stable: compromised 2026-10-21, see docs.litellm.ai/blog/security-incident-oct-21-2026."
 }
 
 variable "upstream_api_base" {
@@ -34,12 +34,14 @@ variable "upstream_api_base" {
 }
 
 variable "models" {
-  description = "OpenAI-compatible models exposed by the gateway. Map key is the model_name clients request; the value maps it to the upstream. api_key is optional and lands in the litellm-env secret, referenced from proxy_config via os.environ/."
+  description = "OpenAI-compatible models exposed by the gateway. Map key is the model_name clients request; the value maps it to the upstream. api_key is optional and lands in the litellm-env secret, referenced from proxy_config via os.environ/. Decision models (Cloudflare Clef, TypeSafe Jev, vLLM/SGLang structured-decisions servers) need provider = \"hosted_vllm\" and mode = \"evaluation\": the Admin UI lists only model groups whose model_info.mode is evaluation as decision models, and only the hosted_vllm decisions transform speaks System One against a self-hosted api_base (docs.litellm.ai/docs/decisions/providers)."
   sensitive   = true
   type = map(object({
     model    = string
     api_base = optional(string)
     api_key  = optional(string, "")
+    provider = optional(string, "openai")
+    mode     = optional(string, "")
   }))
   default = {}
 
