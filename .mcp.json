@@ -2,7 +2,7 @@
   "mcpServers": {
     "agent-lab": {
       "type": "http",
-      "url": "https://agent-lab.bsantanna.me/mcp/"
+      "url": "https://agent-lab.btech.software/mcp/"
     }
   }
 }
