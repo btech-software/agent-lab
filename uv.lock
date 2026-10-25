@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
@@ -674,7 +674,7 @@ requires-dist = [
     { name = "ddgs", specifier = ">=9.14.4,<9.17.0" },
     { name = "dependency-injector", specifier = "~=4.49.1" },
     { name = "fastapi", extras = ["standard"], specifier = "~=0.139.0" },
-    { name = "fastapi-keycloak-middleware", specifier = "~=1.6.0" },
+    { name = "fastapi-keycloak-middleware", specifier = ">=1.6,<2.1" },
     { name = "fastmcp", specifier = ">=3.4.5,<4.2.0" },
     { name = "hvac", specifier = "~=2.4.0" },
     { name = "icalendar", specifier = ">=7.2.2,<7.4.0" },
@@ -1578,15 +1578,15 @@ wheels = [
 
 [[package]]
 name = "fastapi-keycloak-middleware"
-version = "1.6.0"
+version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi" },
     { name = "python-keycloak" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0f/4d/5bea8c55add29cded860a1e3688f35075ef1a75ffec3a62129f23eeb9548/fastapi_keycloak_middleware-1.6.0.tar.gz", hash = "sha256:669544337fcff02ab508b33a61c8ef0b7a8d313fe221ad7ba6d0c7e1a15f9fc9", size = 15963, upload-time = "2026-01-11T11:04:39.399Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/23/48/208a19d25d3614af42edc1819d3b81463a3a1b61da1b77a2002ca60e7d54/fastapi_keycloak_middleware-2.0.0.tar.gz", hash = "sha256:1272994a4ed57d3967f5cde10a0053854f97c87fba597d83c73e1acd2e0ef850", size = 20271, upload-time = "2026-10-15T22:13:54.074Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/b5/0300eb18d1bafab74af172df7bf633a18492679a05488992f09aa8dfbbd0/fastapi_keycloak_middleware-1.6.0-py3-none-any.whl", hash = "sha256:0582e5fc80e990a202aee479f8833c854245e2c7936e31daec128d84f5bd8231", size = 22982, upload-time = "2026-01-11T11:04:38.026Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/fd/3f276ee4f97a66e9c8af4617205578a850890da5280ff03e2cb0d036b39c/fastapi_keycloak_middleware-2.0.0-py3-none-any.whl", hash = "sha256:748b79044b14036b2ab8067103d0e6fc78c7f139004f766e3c0bd8f33bf57a00", size = 28244, upload-time = "2026-10-15T22:13:54.832Z" },
 ]
 
 [[package]]
