@@ -90,7 +90,7 @@ The MCP server lives in `agent_lab/interface/mcp/` and is mounted at `/mcp` in `
 
 ### Porting between Agent-Lab and downstream forks
 
-When syncing generic improvements (see CLAUDE.md for the boundary rules):
+When syncing generic improvements (see `AGENTS.md` § Synchronization with downstream projects for the boundary rules):
 - Diff both directions first — agent-lab evolves independently (dependency versions, tracing backends, test tooling are usually ahead of forks). Never assume the fork is strictly newer.
 - Port tests together with code, genericizing fork-specific fixture names (agent types, setting values).
 - Agent-lab is the canonical template for new downstream projects: prefer the cleanest generic API over byte-parity with an old fork, and note deliberate divergences so forks adopt the new version.
