@@ -163,7 +163,7 @@ def test_bake_produces_expected_tree(tmp_path, toggles):
 
 
 def test_runtime_prompt_template_survives_bake(tmp_path):
-    root = bake(tmp_path)
+    root = bake(tmp_path, include_docker=True)
     prompt = (
         root
         / "test_app"

@@ -48,7 +48,10 @@ building LLM-backed agents comes next (see [What's next?](#whats-next)).
 uvx cookiecutter gh:btech-software/agent-lab --directory cookiecutter
 ```
 
-Answer the prompts — the defaults give you a project named **My Agent App**:
+Answer the prompts. Every optional feature defaults to `n`; this tutorial uses
+Docker and the integration suite, so answer `y` to `include_docker` and
+`include_testcontainers` (and to `include_github_actions` if you want CI). The
+remaining defaults give you a project named **My Agent App**:
 
 ```bash
 cd my-agent-app
