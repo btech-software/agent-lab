@@ -169,8 +169,9 @@ class AttachmentService:
         )
 
     def optimize_audio(self, file_path: str) -> bytes:
+        # write next to the input (the caller's temp dir), never the CWD
+        temp_file_path = os.path.join(os.path.dirname(file_path), f"temp-{uuid4()}.mp3")
         try:
-            temp_file_path = f"temp-{uuid4()}.mp3"
             # Run the ffmpeg command to optimize the audio
             subprocess.run(
                 [
@@ -196,4 +197,6 @@ class AttachmentService:
 
             return optimized_audio
         except subprocess.CalledProcessError as e:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
             raise AudioOptimizationError(e)

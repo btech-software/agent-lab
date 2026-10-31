@@ -1,3 +1,4 @@
+import os
 import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -261,8 +262,33 @@ class TestOptimizeAudio:
         assert ffmpeg_args[0] == "ffmpeg"
         assert ffmpeg_args[2] == str(audio_file)
         temp_output = ffmpeg_args[-1]
-        assert temp_output.startswith("temp-") and temp_output.endswith(".mp3")
+        # written next to the input (the caller's temp dir), never the CWD
+        assert os.path.dirname(temp_output) == str(tmp_path)
+        assert temp_output.endswith(".mp3")
         assert mv_args == ["mv", temp_output, str(audio_file)]
+
+    @patch("agent_lab.services.attachments.subprocess.run")
+    def test_optimize_audio_failure_leaves_no_partial_output(
+        self, subprocess_run, attachment_service, tmp_path, monkeypatch
+    ):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        service, *_ = attachment_service
+        audio_file = tmp_path / "memo.wav"
+        audio_file.write_bytes(b"raw")
+
+        def ffmpeg_fails(args, check):
+            open(args[-1], "wb").write(b"partial")
+            raise subprocess.CalledProcessError(1, "ffmpeg")
+
+        subprocess_run.side_effect = ffmpeg_fails
+
+        with pytest.raises(AudioOptimizationError):
+            service.optimize_audio(str(audio_file))
+
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["cwd", "memo.wav"]
+        assert list(cwd.iterdir()) == []
 
     @patch("agent_lab.services.attachments.subprocess.run")
     def test_optimize_audio_failure_raises(self, subprocess_run, attachment_service):

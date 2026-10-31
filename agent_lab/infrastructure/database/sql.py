@@ -13,6 +13,14 @@ Base = declarative_base()
 _SCHEMA_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
 
 
+def validate_schema_name(schema_name: str) -> str:
+    """Reject anything that is not a plain unquoted PostgreSQL identifier
+    (max 63 chars): tenant schemas are interpolated into SQL and names."""
+    if not _SCHEMA_NAME_PATTERN.fullmatch(schema_name):
+        raise ValueError(f"invalid tenant schema name: {schema_name!r}")
+    return schema_name
+
+
 class Database:
     def __init__(self, db_url: str) -> None:
         self.engine = create_engine(db_url, echo=False)
@@ -27,15 +35,8 @@ class Database:
         self.default_schema = "public"
 
     def sanitize_schema_name(self, schema_name: str) -> str:
-        """Sanitize schema name by replacing invalid characters (e.g., hyphens).
-
-        The result is interpolated into DDL/SET statements, so anything that is
-        not a plain unquoted PostgreSQL identifier (max 63 chars) is rejected.
-        """
-        sanitized = schema_name.replace("-", "_")
-        if not _SCHEMA_NAME_PATTERN.fullmatch(sanitized):
-            raise ValueError(f"invalid tenant schema name: {schema_name!r}")
-        return sanitized
+        """Sanitize schema name by replacing invalid characters (e.g., hyphens)."""
+        return validate_schema_name(schema_name.replace("-", "_"))
 
     def create_database(self, schema_name: str = "public") -> None:
         sanitized_schema = self.sanitize_schema_name(schema_name)

@@ -182,3 +182,30 @@ class TestPostMessageEndpoint:
         )
 
         assert threads and threads[0] is not threading.current_thread()
+
+
+class TestAgentRunLimiter:
+    @pytest.mark.asyncio
+    async def test_agent_runs_do_not_borrow_default_threadpool_tokens(self):
+        import anyio.to_thread
+
+        from agent_lab.services.agent_types.base import AGENT_RUN_LIMITER, run_agent
+
+        seen = {}
+        default_limiter = anyio.to_thread.current_default_thread_limiter()
+
+        def process_message(message, schema):
+            seen["default_borrowed"] = default_limiter.borrowed_tokens
+            seen["agent_borrowed"] = AGENT_RUN_LIMITER.borrowed_tokens
+            return f"{message}@{schema}"
+
+        agent = MagicMock()
+        agent.process_message.side_effect = process_message
+
+        assert await run_agent(agent, "hi", "test") == "hi@test"
+        assert seen == {"default_borrowed": 0, "agent_borrowed": 1}
+
+    def test_capacity_stays_below_checkpointer_pool(self):
+        from agent_lab.services.agent_types.base import AGENT_RUN_LIMITER
+
+        assert AGENT_RUN_LIMITER.total_tokens < 20

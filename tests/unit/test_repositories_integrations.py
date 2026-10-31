@@ -126,3 +126,51 @@ class TestIntegrationNotFoundError:
         error = IntegrationNotFoundError("test-id")
         assert error.status_code == 404
         assert "Integration" in error.detail
+
+
+class TestIntegrationSecretCleanupEdges:
+    def _add(self, repo):
+        return repo.add(
+            integration_type="openai_api_v1",
+            api_endpoint="https://api.openai.com",
+            api_key="sk-test",
+            schema="test_schema",
+        )
+
+    def test_refresh_failure_after_commit_keeps_secret(self, mock_db, mock_vault):
+        db, session = mock_db
+        repo = IntegrationRepository(db=db, vault_client=mock_vault)
+        session.refresh.side_effect = RuntimeError("connection reset")
+
+        with pytest.raises(RuntimeError):
+            self._add(repo)
+
+        session.commit.assert_called_once()
+        mock_vault.secrets.kv.v2.delete_metadata_and_all_versions.assert_not_called()
+
+    def test_cleanup_failure_does_not_mask_insert_error(self, mock_db, mock_vault):
+        db, session = mock_db
+        repo = IntegrationRepository(db=db, vault_client=mock_vault)
+        session.commit.side_effect = RuntimeError("db down")
+        mock_vault.secrets.kv.v2.delete_metadata_and_all_versions.side_effect = (
+            ConnectionError("vault down")
+        )
+
+        with pytest.raises(RuntimeError, match="db down"):
+            self._add(repo)
+
+    def test_vault_failure_after_delete_commit_is_logged(
+        self, mock_db, mock_vault, caplog
+    ):
+        db, session = mock_db
+        repo = IntegrationRepository(db=db, vault_client=mock_vault)
+        integration = MagicMock(spec=Integration)
+        session.query.return_value.filter.return_value.first.return_value = integration
+        mock_vault.secrets.kv.v2.delete_metadata_and_all_versions.side_effect = (
+            ConnectionError("vault down")
+        )
+
+        repo.delete_by_id(integration_id="int-1", schema="test_schema")
+
+        assert integration.is_active is False
+        assert "integration_int-1" in caplog.text

@@ -187,3 +187,33 @@ class TestDocumentRepositoryTenantScope:
         assert {"attachment_id", "att-1", ("new-1",)} <= {
             tuple(v) if isinstance(v, list) else v for v in compiled.params.values()
         }
+
+    @pytest.mark.parametrize("schema", ["id_a/b", "id_x; drop", "", "../etc"])
+    def test_rejects_invalid_schema_without_touching_the_store(self, schema):
+        from agent_lab.infrastructure.database.vectors import DocumentRepository
+
+        with patch(
+            "agent_lab.infrastructure.database.vectors.PGVector"
+        ) as pgvector_cls:
+            with pytest.raises(ValueError):
+                DocumentRepository(db_url="postgresql://x").search(
+                    MagicMock(), "kb", "q", schema=schema
+                )
+        pgvector_cls.assert_not_called()
+
+    @patch("agent_lab.infrastructure.database.vectors.PGVector")
+    def test_vector_stores_share_one_engine_per_database(self, pgvector_cls):
+        from sqlalchemy.engine import Engine
+
+        from agent_lab.infrastructure.database.vectors import DocumentRepository
+
+        DocumentRepository(db_url="postgresql://u@h/vec").search(
+            MagicMock(), "kb", "q", schema="id_a"
+        )
+        DocumentRepository(db_url="postgresql://u@h/vec").add(
+            MagicMock(), "kb", [], schema="id_b"
+        )
+
+        engines = [c.kwargs["connection"] for c in pgvector_cls.call_args_list]
+        assert isinstance(engines[0], Engine)
+        assert engines[0] is engines[1]

@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 from datetime import timedelta, datetime, timezone
 from urllib.parse import urlparse
 
+import anyio
+import anyio.to_thread
 import hvac
 import icalendar
 from browser_use import (
@@ -121,6 +123,17 @@ class StructuredOutputChatOpenAI(ChatOpenAI):
 JEV_DECISION_THRESHOLD = 0.5
 
 DecisionT = TypeVar("DecisionT")
+
+# Agent runs are synchronous and long: they run on worker threads with their own
+# limiter so they never take anyio's default tokens (used by sync endpoints
+# such as the status probes), and stay below the checkpointer pool (max 20).
+AGENT_RUN_LIMITER = anyio.CapacityLimiter(16)
+
+
+async def run_agent(agent: "AgentBase", message_request, schema: str):
+    return await anyio.to_thread.run_sync(
+        agent.process_message, message_request, schema, limiter=AGENT_RUN_LIMITER
+    )
 
 
 class DecisionState(MessagesState):
