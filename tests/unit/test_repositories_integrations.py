@@ -85,6 +85,9 @@ class TestIntegrationRepository:
 
         assert integration.is_active is False
         session.commit.assert_called_once()
+        mock_vault.secrets.kv.v2.delete_metadata_and_all_versions.assert_called_once_with(
+            path="integration_int-1"
+        )
 
     def test_delete_by_id_not_found(self, mock_db, mock_vault):
         db, session = mock_db
@@ -93,6 +96,26 @@ class TestIntegrationRepository:
 
         with pytest.raises(IntegrationNotFoundError):
             repo.delete_by_id(integration_id="nonexistent", schema="test_schema")
+        mock_vault.secrets.kv.v2.delete_metadata_and_all_versions.assert_not_called()
+
+    @patch("agent_lab.domain.repositories.integrations.uuid4")
+    def test_add_removes_secret_when_insert_fails(self, mock_uuid, mock_db, mock_vault):
+        db, session = mock_db
+        repo = IntegrationRepository(db=db, vault_client=mock_vault)
+        mock_uuid.return_value = "generated-uuid"
+        session.commit.side_effect = RuntimeError("db down")
+
+        with pytest.raises(RuntimeError):
+            repo.add(
+                integration_type="openai_api_v1",
+                api_endpoint="https://api.openai.com",
+                api_key="sk-test",
+                schema="test_schema",
+            )
+
+        mock_vault.secrets.kv.v2.delete_metadata_and_all_versions.assert_called_once_with(
+            path="integration_generated-uuid"
+        )
 
 
 class TestIntegrationNotFoundError:

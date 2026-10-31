@@ -33,6 +33,13 @@ jobs:
         run: |
           git fetch origin gh-pages:gh-pages
           git checkout gh-pages
+          # published chart versions are immutable: never overwrite an archive
+          for chart in helm-repo/*.tgz; do
+            if [ -e "$(basename "$chart")" ]; then
+              echo "::error::$(basename "$chart") is already published; bump the chart version"
+              exit 1
+            fi
+          done
           mv helm-repo/* .
 
       - name: Generate index.yaml

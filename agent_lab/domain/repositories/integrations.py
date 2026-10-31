@@ -42,17 +42,21 @@ class IntegrationRepository:
             secret={"api_endpoint": api_endpoint, "api_key": api_key},
         )
 
-        with self.db.session(schema_name=schema) as session:
-            integration = Integration(
-                id=str(gen_id),
-                created_at=datetime.now(),
-                is_active=True,
-                integration_type=integration_type,
-            )
-            session.add(integration)
-            session.commit()
-            session.refresh(integration)
-            return integration
+        try:
+            with self.db.session(schema_name=schema) as session:
+                integration = Integration(
+                    id=str(gen_id),
+                    created_at=datetime.now(),
+                    is_active=True,
+                    integration_type=integration_type,
+                )
+                session.add(integration)
+                session.commit()
+                session.refresh(integration)
+                return integration
+        except Exception:
+            self._delete_secret(str(gen_id))
+            raise
 
     def delete_by_id(self, integration_id: str, schema: str) -> None:
         with self.db.session(schema_name=schema) as session:
@@ -66,6 +70,12 @@ class IntegrationRepository:
 
             entity.is_active = False
             session.commit()
+        self._delete_secret(integration_id)
+
+    def _delete_secret(self, integration_id: str) -> None:
+        self.vault_client.secrets.kv.v2.delete_metadata_and_all_versions(
+            path=f"integration_{integration_id}"
+        )
 
 
 class IntegrationNotFoundError(NotFoundError):

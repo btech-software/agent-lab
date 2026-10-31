@@ -221,3 +221,33 @@ class TestAgentNotFoundError:
 class TestAgentSettingNotFoundError:
     def test_entity_name(self):
         assert AgentSettingNotFoundError.entity_name == "AgentSetting"
+
+
+class TestDatabaseSchemaName:
+    def _db(self):
+        from agent_lab.infrastructure.database.sql import Database
+
+        return Database("postgresql://u:p@localhost:1/db")
+
+    def test_uuid_schema_is_kept(self):
+        schema = "id_5f0c1e2a-9b7d-4c3e-8a1f-0d2b3c4e5f60"
+        assert (
+            self._db().sanitize_schema_name(schema)
+            == "id_5f0c1e2a_9b7d_4c3e_8a1f_0d2b3c4e5f60"
+        )
+
+    @pytest.mark.parametrize(
+        "schema",
+        [
+            "id_x; DROP SCHEMA public CASCADE",
+            "id_user@example.com",
+            "id_a.b",
+            'id_a"b',
+            "1abc",
+            "",
+            "id_" + "a" * 61,
+        ],
+    )
+    def test_non_identifier_schema_is_rejected(self, schema):
+        with pytest.raises(ValueError):
+            self._db().sanitize_schema_name(schema)

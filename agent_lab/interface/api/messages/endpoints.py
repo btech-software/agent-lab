@@ -2,6 +2,7 @@ from dependency_injector.wiring import inject, Provide
 from fastapi import APIRouter, Depends, Body, Response, status
 from fastapi.security import HTTPBearer
 from fastapi_keycloak_middleware import get_user
+from starlette.concurrency import run_in_threadpool
 from typing_extensions import Annotated, List
 
 from agent_lab.core.container import Container
@@ -198,8 +199,10 @@ async def post_message(
         schema=schema,
     )
 
-    # Process human message
-    processed_message = matching_agent.process_message(message_data, schema)
+    # Process human message (synchronous agent run, kept off the event loop)
+    processed_message = await run_in_threadpool(
+        matching_agent.process_message, message_data, schema
+    )
 
     # Store assistant message
     assistant_message = message_service.create_message(

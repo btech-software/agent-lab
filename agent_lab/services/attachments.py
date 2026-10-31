@@ -1,4 +1,5 @@
 import os
+import tempfile
 from uuid import uuid4
 import subprocess
 import anyio
@@ -43,34 +44,31 @@ class AttachmentService:
         return self.attachment_repository.get_by_id(attachment_id, schema)
 
     async def create_attachment_with_file(self, file: File, schema: str) -> Attachment:
-        temp_file_path = f"temp-{uuid4()}"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_file_path = os.path.join(temp_dir, f"temp-{uuid4()}")
 
-        async with await anyio.open_file(temp_file_path, "wb") as buffer:
-            raw_content = await file.read()
-            await buffer.write(raw_content)
+            async with await anyio.open_file(temp_file_path, "wb") as buffer:
+                raw_content = await file.read()
+                await buffer.write(raw_content)
 
-        if not file.content_type.startswith("audio/"):
-            file_name = file.filename
-            try:
-                markdown = MarkItDown()
-                parsed_content = markdown.convert(temp_file_path).text_content
-            except Exception as e:
-                raise FileProcessingError(file_name=file_name, reason=str(e))
-        else:
-            raw_content = self.optimize_audio(temp_file_path)
-            file_name = file.filename.replace(file.filename.split(".")[-1], "mp3")
-            parsed_content = ""
+            if not file.content_type.startswith("audio/"):
+                file_name = file.filename
+                try:
+                    markdown = MarkItDown()
+                    parsed_content = markdown.convert(temp_file_path).text_content
+                except Exception as e:
+                    raise FileProcessingError(file_name=file_name, reason=str(e))
+            else:
+                raw_content = self.optimize_audio(temp_file_path)
+                file_name = file.filename.replace(file.filename.split(".")[-1], "mp3")
+                parsed_content = ""
 
-        attachment = self.create_attachment_with_content(
-            file_name=file_name,
-            raw_content=raw_content,
-            parsed_content=parsed_content,
-            schema=schema,
-        )
-
-        os.remove(temp_file_path)
-
-        return attachment
+            return self.create_attachment_with_content(
+                file_name=file_name,
+                raw_content=raw_content,
+                parsed_content=parsed_content,
+                schema=schema,
+            )
 
     def create_attachment_with_content(
         self,
@@ -89,6 +87,12 @@ class AttachmentService:
         )
 
     def delete_attachment_by_id(self, attachment_id: str, schema: str) -> None:
+        attachment = self.attachment_repository.get_by_id(attachment_id, schema)
+        if attachment.embeddings_collection:
+            # deleting vectors needs no embedding calls, so no model is built
+            self.document_repository.delete_by_attachment(
+                None, attachment.embeddings_collection, attachment_id, schema=schema
+            )
         return self.attachment_repository.delete_by_id(attachment_id, schema)
 
     async def create_embeddings(
@@ -130,21 +134,39 @@ class AttachmentService:
         )
 
         attachment = self.attachment_repository.get_by_id(attachment_id, schema)
-        temp_file_path = f"temp-{uuid4()}"
-        async with await anyio.open_file(temp_file_path, "wb") as buffer:
-            await buffer.write(attachment.parsed_content.encode())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_file_path = os.path.join(temp_dir, f"temp-{uuid4()}")
+            async with await anyio.open_file(temp_file_path, "wb") as buffer:
+                await buffer.write(attachment.parsed_content.encode())
 
-        loader = TextLoader(temp_file_path)
-        documents = loader.load_and_split(
-            CharacterTextSplitter(chunk_size=512, chunk_overlap=64)
-        )
-        self.document_repository.add(embeddings_model, collection_name, documents)
-        updated_attachment = self.attachment_repository.update_attachment(
+            loader = TextLoader(temp_file_path)
+            documents = loader.load_and_split(
+                CharacterTextSplitter(chunk_size=512, chunk_overlap=64)
+            )
+
+        # re-embedding replaces this attachment's chunks instead of appending:
+        # write the new chunks first so a failed embedding keeps the old ones
+        for document in documents:
+            document.metadata["attachment_id"] = attachment_id
+            document.id = str(uuid4())
+        # no extractable text (e.g. audio, parsed_content="") yields no chunks
+        if documents:
+            self.document_repository.add(
+                embeddings_model, collection_name, documents, schema=schema
+            )
+        new_ids = [document.id for document in documents]
+        previous_collections = {attachment.embeddings_collection, collection_name}
+        for previous_collection in previous_collections - {None, ""}:
+            self.document_repository.delete_by_attachment(
+                embeddings_model,
+                previous_collection,
+                attachment_id,
+                schema=schema,
+                keep_ids=new_ids,
+            )
+        return self.attachment_repository.update_attachment(
             attachment_id, collection_name, schema
         )
-
-        os.remove(temp_file_path)
-        return updated_attachment
 
     def optimize_audio(self, file_path: str) -> bytes:
         try:

@@ -76,6 +76,7 @@ class ReactRagAgent(AgentBase):
             collection_name=collection_name,
             query=query,
             size=7,
+            schema=schema,
         )
         context = "\n---\n".join(document.page_content for document in documents)
         return {

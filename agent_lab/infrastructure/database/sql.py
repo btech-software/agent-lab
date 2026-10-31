@@ -1,4 +1,5 @@
 import logging
+import re
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, orm
@@ -8,6 +9,8 @@ from sqlalchemy.sql import text
 logger = logging.getLogger(__name__)
 
 Base = declarative_base()
+
+_SCHEMA_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
 
 
 class Database:
@@ -24,8 +27,15 @@ class Database:
         self.default_schema = "public"
 
     def sanitize_schema_name(self, schema_name: str) -> str:
-        """Sanitize schema name by replacing invalid characters (e.g., hyphens)."""
-        return schema_name.replace("-", "_")
+        """Sanitize schema name by replacing invalid characters (e.g., hyphens).
+
+        The result is interpolated into DDL/SET statements, so anything that is
+        not a plain unquoted PostgreSQL identifier (max 63 chars) is rejected.
+        """
+        sanitized = schema_name.replace("-", "_")
+        if not _SCHEMA_NAME_PATTERN.fullmatch(sanitized):
+            raise ValueError(f"invalid tenant schema name: {schema_name!r}")
+        return sanitized
 
     def create_database(self, schema_name: str = "public") -> None:
         sanitized_schema = self.sanitize_schema_name(schema_name)

@@ -147,3 +147,43 @@ class TestAttachmentNotFoundError:
         error = AttachmentNotFoundError("test-id")
         assert error.status_code == 404
         assert "Attachment" in error.detail
+
+
+class TestDocumentRepositoryTenantScope:
+    @patch("agent_lab.infrastructure.database.vectors.PGVector")
+    def test_collection_is_namespaced_by_schema(self, pgvector_cls):
+        from agent_lab.infrastructure.database.vectors import DocumentRepository
+
+        repo = DocumentRepository(db_url="postgresql://x")
+        embeddings = MagicMock()
+
+        repo.search(embeddings, "static_document_data", "q", schema="id_tenant_a")
+        repo.add(embeddings, "static_document_data", [], schema="id_tenant_b")
+
+        names = [c.kwargs["collection_name"] for c in pgvector_cls.call_args_list]
+        assert names == [
+            "id_tenant_a/static_document_data",
+            "id_tenant_b/static_document_data",
+        ]
+
+    @patch("agent_lab.infrastructure.database.vectors.PGVector")
+    def test_delete_by_attachment_keeps_listed_ids(self, pgvector_cls):
+        from sqlalchemy.dialects import postgresql
+
+        from agent_lab.infrastructure.database.vectors import DocumentRepository
+        from langchain_postgres.vectorstores import _get_embedding_collection_store
+
+        store = pgvector_cls.return_value
+        store.EmbeddingStore, _ = _get_embedding_collection_store()
+        session = store.session_maker.return_value.__enter__.return_value
+
+        DocumentRepository(db_url="postgresql://x").delete_by_attachment(
+            None, "kb", "att-1", schema="id_t", keep_ids=["new-1"]
+        )
+
+        statement = session.execute.call_args.args[0]
+        compiled = statement.compile(dialect=postgresql.dialect())
+        assert "NOT IN" in str(compiled)
+        assert {"attachment_id", "att-1", ("new-1",)} <= {
+            tuple(v) if isinstance(v, list) else v for v in compiled.params.values()
+        }

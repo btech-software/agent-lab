@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -518,6 +519,16 @@ class TestAgentBaseHelpers:
         assert isinstance(client, OpenAI)
         assert client.api_key == "api-key"
 
+    def test_get_openai_client_applies_tenant_timeout(self):
+        agent = _make_agent("openai_api_v1")
+        agent.language_model_setting_service.get_language_model_settings.return_value = [
+            _setting("timeout", "30"),
+        ]
+
+        client = agent.get_openai_client("agent-1", "test")
+
+        assert client.timeout == pytest.approx(30.0)
+
     def test_read_file_content(self, tmp_path):
         agent = EchoAgent(agent_utils=MagicMock())
         file_path = tmp_path / "prompt.txt"
@@ -800,6 +811,18 @@ class TestWebAgentBase:
 
         assert '"error": "boom"' in output
 
+    @patch("agent_lab.services.agent_types.base.MarkItDown")
+    def test_get_web_crawl_tool_rejects_non_web_sources(self, markitdown_cls):
+        markitdown_cls.return_value.convert.return_value.text_content = "content"
+        agent = self._agent("openai_api_v1")
+        sources = ["secret.txt", "file:///etc/passwd", "/etc/hosts", "ftp://h/x"]
+
+        output = json.loads(agent.get_web_crawl_tool().func(urls=sources))
+
+        assert [r["url"] for r in output["results"]] == sources
+        assert all("error" in r and "content" not in r for r in output["results"])
+        markitdown_cls.return_value.convert.assert_not_called()
+
     def test_get_web_search_tool(self):
         tool = self._agent("openai_api_v1").get_web_search_tool()
 
@@ -1078,6 +1101,7 @@ class TestCoordinatorPlannerSupervisorAgent:
         output = agent.get_research_knowledge_base_tool(self._state()).func()
 
         assert output == "doc-1\n\ndoc-2"
+        assert agent.document_repository.search.call_args.kwargs["schema"] == "test"
 
     @pytest.mark.parametrize("deep_search", [True, False])
     @patch(
@@ -1319,6 +1343,7 @@ class TestAdaptiveRagAgent:
         result = agent.retrieve(self._state())
 
         assert result == {"documents": documents}
+        assert agent.document_repository.search.call_args.kwargs["schema"] == "test"
 
     def test_transform_query(self):
         agent = self._agent()
@@ -1903,6 +1928,48 @@ class TestAzureWorkflowBase:
 
         assert output == "Error: 503 - unavailable"
 
+    @staticmethod
+    def _requested_url(requests_get) -> str:
+        import requests
+
+        call = requests_get.call_args
+        return (
+            requests.Request("GET", call.args[0], params=call.kwargs.get("params"))
+            .prepare()
+            .url
+        )
+
+    @patch("agent_lab.services.agent_types.azure.requests.get")
+    def test_person_search_escapes_odata_literal(self, requests_get):
+        from urllib.parse import parse_qs, urlsplit
+
+        requests_get.return_value.status_code = 200
+        requests_get.return_value.json.return_value = {"value": []}
+
+        self._agent().get_person_search_tool().func(
+            name="O'Brien') or startswith(mail,'a&$top=999"
+        )
+
+        query = parse_qs(urlsplit(self._requested_url(requests_get)).query)
+        assert query == {
+            "$filter": [
+                "startswith(displayName,'O''Brien'') or startswith(mail,''a&$top=999')"
+            ]
+        }
+
+    @patch("agent_lab.services.agent_types.azure.requests.get")
+    def test_person_details_escapes_path_segment(self, requests_get):
+        requests_get.return_value.status_code = 404
+
+        self._agent().get_person_details_tool().func(
+            email="x@y.com/../../groups?$top=1"
+        )
+
+        url = self._requested_url(requests_get)
+        assert url.startswith("https://graph.microsoft.com/v1.0/users/")
+        segment = url.removeprefix("https://graph.microsoft.com/v1.0/users/")
+        assert "/" not in segment and "?" not in segment
+
 
 class TestReactRagAgent:
     def _agent(self) -> ReactRagAgent:
@@ -1944,6 +2011,7 @@ class TestReactRagAgent:
         params = agent.get_input_params(_message_request(), "test")
 
         assert "doc-1\n---\ndoc-2" in params["messages"][0][1]
+        assert agent.document_repository.search.call_args.kwargs["schema"] == "test"
 
     def test_process_message(self):
         agent = self._agent()

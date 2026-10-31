@@ -12,6 +12,8 @@ from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 from testcontainers.vault import VaultContainer
 
+from agent_lab.infrastructure.auth.user import get_schema
+
 os.environ["TESTING"] = "1"
 # the ollama test container doubles as an OpenAI-compatible embeddings server
 os.environ["EMBEDDINGS_ENDPOINT"] = "http://localhost:21434/v1"
@@ -66,7 +68,7 @@ cdp = (
 )
 
 
-def setup_postgres():
+def setup_postgres(test_user_id: str):
     # setup databases
     psql_command = "PGPASSWORD='postgres' psql --username postgres --host 127.0.0.1"
     create_database_command = f"{psql_command} -c 'create database ?;'"
@@ -79,6 +81,13 @@ def setup_postgres():
     restore_dump_command = (
         f"{psql_command} -d agent_lab_vectors < /tmp/pgvector_dump.sql"
     )
+    # vector collections are tenant-scoped ("<schema>/<name>"): hand the dump's
+    # shared collection to the test user's tenant
+    test_schema = get_schema(f"id_{test_user_id}")
+    scope_dump_command = (
+        f"{psql_command} -d agent_lab_vectors -c "
+        f"\"UPDATE langchain_pg_collection SET name = '{test_schema}/' || name\""
+    )
 
     postgres.exec(
         [
@@ -89,7 +98,8 @@ def setup_postgres():
                 {checkpoints_db_command} &&
                 {vectors_db_command} &&
                 {copy_dump_command} &&
-                {restore_dump_command}
+                {restore_dump_command} &&
+                {scope_dump_command}
                 """,
         ]
     )
@@ -223,6 +233,7 @@ def setup_keycloak():
         data=json.dumps(user_data),
     )
     response.raise_for_status()
+    return response.headers["Location"].rsplit("/", 1)[-1]
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -261,8 +272,8 @@ def test_config(request):
 
     request.addfinalizer(remove_container)
 
-    setup_keycloak()
+    test_user_id = setup_keycloak()
     setup_ollama()
-    setup_postgres()
+    setup_postgres(test_user_id)
 
     yield

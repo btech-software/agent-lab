@@ -239,6 +239,42 @@ class TestOtelLogHandlerAttachment:
         assert log_handlers, "OTel LoggingHandler not attached to the root logger"
 
 
+class TestLoggingMiddlewareRedaction:
+    def test_credentials_are_redacted_from_header_logs(self, caplog):
+        from fastapi import FastAPI, Response
+        from fastapi.testclient import TestClient
+
+        from agent_lab.infrastructure.metrics.logging_middleware import (
+            LoggingMiddleware,
+        )
+
+        app = FastAPI()
+        app.add_middleware(LoggingMiddleware)
+
+        @app.get("/probe")
+        def probe(response: Response):
+            response.set_cookie("session", "SET-COOKIE-SECRET")
+            return {}
+
+        with caplog.at_level(
+            logging.DEBUG, logger="agent_lab.infrastructure.metrics.logging_middleware"
+        ):
+            TestClient(app).get(
+                "/probe",
+                headers={
+                    "Authorization": "Bearer TOPSECRET-TOKEN-123",
+                    "Cookie": "session=COOKIE-SECRET",
+                    "X-Trace": "visible",
+                },
+            )
+
+        logged = caplog.text
+        assert "Request headers" in logged and "Response headers" in logged
+        assert "TOPSECRET-TOKEN-123" not in logged
+        assert "COOKIE-SECRET" not in logged
+        assert "visible" in logged
+
+
 def test_module_state_restored():
     """Safety net: ensure no test in this module leaks registered backends."""
     assert tracing._active_backends == []

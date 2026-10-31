@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Annotated, Optional
 
 from fastmcp import FastMCP
 from pydantic import Field
+from starlette.concurrency import run_in_threadpool
 
 from agent_lab.interface.mcp.prompt_registry import PromptRegistry
 from agent_lab.interface.mcp.registrar import McpRegistrar
@@ -128,7 +129,10 @@ async def post_message(
         schema=schema,
     )
 
-    processed_message = matching_agent.process_message(message_request, schema)
+    # the agent run is synchronous: keep it off the event loop
+    processed_message = await run_in_threadpool(
+        matching_agent.process_message, message_request, schema
+    )
 
     assistant_message = message_service.create_message(
         message_role="assistant",

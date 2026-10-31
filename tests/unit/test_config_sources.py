@@ -97,3 +97,45 @@ def test_default_config_source_without_role_keeps_yaml_selection(monkeypatch):
 
     assert isinstance(source, YamlConfigSource)
     assert source.path == "config-docker.yml"
+
+
+class TestVaultTlsVerification:
+    def _verify_kwargs(self, tmp_path):
+        jwt_path = tmp_path / "token"
+        jwt_path.write_text("sa-jwt")
+        sources = [
+            VaultConfigSource(url="https://vault:8200", token="root"),
+            KubernetesVaultConfigSource(
+                url="https://vault:8200", role="r", jwt_path=str(jwt_path)
+            ),
+        ]
+        verify = []
+        for source in sources:
+            with patch("hvac.Client") as client_cls:
+                client_cls.return_value.secrets.kv.read_secret_version.return_value = {
+                    "data": {"data": APP_SECRETS}
+                }
+                source.load()
+            verify.extend(c.kwargs["verify"] for c in client_cls.call_args_list)
+        return verify
+
+    def test_verifies_certificates_by_default(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("VAULT_SKIP_VERIFY", raising=False)
+        monkeypatch.delenv("VAULT_CACERT", raising=False)
+        assert self._verify_kwargs(tmp_path) == [True, True, True]
+
+    def test_custom_ca_bundle(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("VAULT_SKIP_VERIFY", raising=False)
+        monkeypatch.setenv("VAULT_CACERT", "/etc/ssl/vault-ca.pem")
+        assert set(self._verify_kwargs(tmp_path)) == {"/etc/ssl/vault-ca.pem"}
+
+    def test_explicit_opt_out(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("VAULT_SKIP_VERIFY", "true")
+        assert set(self._verify_kwargs(tmp_path)) == {False}
+
+    def test_container_vault_client_uses_same_setting(self, monkeypatch):
+        from agent_lab.core.container import Container
+
+        monkeypatch.delenv("VAULT_SKIP_VERIFY", raising=False)
+        monkeypatch.delenv("VAULT_CACERT", raising=False)
+        assert Container.vault_client.kwargs["verify"]() is True

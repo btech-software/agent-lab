@@ -25,6 +25,14 @@ class YamlConfigSource(ConfigSource):
             return yaml.safe_load(config_file)
 
 
+def vault_tls_verify() -> bool | str:
+    """TLS verification for Vault clients, using Vault's standard env vars:
+    VAULT_SKIP_VERIFY opts out, VAULT_CACERT names a CA bundle, default verifies."""
+    if os.getenv("VAULT_SKIP_VERIFY", "").lower() in ("1", "true", "yes"):
+        return False
+    return os.getenv("VAULT_CACERT") or True
+
+
 class VaultConfigSource(ConfigSource):
     def __init__(
         self,
@@ -41,7 +49,7 @@ class VaultConfigSource(ConfigSource):
     def load(self) -> dict:
         import hvac
 
-        client = hvac.Client(url=self.url, token=self.token, verify=False)
+        client = hvac.Client(url=self.url, token=self.token, verify=vault_tls_verify())
         app_secrets = client.secrets.kv.read_secret_version(
             raise_on_deleted_version=False,
             path=self.secret_path,
@@ -106,7 +114,7 @@ class KubernetesVaultConfigSource(VaultConfigSource):
     def load(self) -> dict:
         import hvac
 
-        client = hvac.Client(url=self.url, verify=False)
+        client = hvac.Client(url=self.url, verify=vault_tls_verify())
         with open(self.jwt_path) as jwt_file:
             client.auth.kubernetes.login(role=self.role, jwt=jwt_file.read())
         self.token = client.token

@@ -182,10 +182,11 @@ def setup_auth(container, application, mounts: List[RouterMount]):
             "/auth/renew(/|$)",
             "/auth/exchange(/|$)",
             "/openapi.json(/|$)",
-            "/status/",
-            ".*well-known/",
+            # matched with re.fullmatch: each entry must cover the whole path
+            "/status(/.*)?$",
+            r"/\.well-known(/.*)?$",
             "/mcp(/.*)?$",
-            "/static/",
+            "/static(/.*)?$",
         ]
         for mount in mounts:
             exclude_patterns.extend(mount.auth_exclude_patterns)
