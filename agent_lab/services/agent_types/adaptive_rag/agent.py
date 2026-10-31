@@ -282,6 +282,7 @@ class AdaptiveRagAgent(WebAgentBase):
             collection_name=collection_name,
             query=query,
             size=3,
+            schema=schema,
         )
 
         return {"documents": documents}

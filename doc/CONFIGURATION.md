@@ -103,6 +103,8 @@ in [Secrets with Vault](VAULT.md) and the [Deployment guide](SETUP.md).
 | `VAULT_ENGINE_PATH` | `secret` | KV-v2 mount point |
 | `VAULT_SECRET_PATH` | `app_secrets` | Secret path |
 | `VAULT_K8S_ROLE` | *(unset)* | Vault Kubernetes auth role; enables the K8s source and takes precedence |
+| `VAULT_CACERT` | *(unset)* | CA bundle used to verify an `https://` Vault certificate (private CA) |
+| `VAULT_SKIP_VERIFY` | *(unset — verify)* | `true` disables Vault TLS certificate verification; development only |
 | `STATIC_DIR` | `static/frontend/browser` | Where the SPA build is looked up |
 
 ### Observability

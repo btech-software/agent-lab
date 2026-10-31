@@ -170,6 +170,18 @@ class TestResourceMetadata:
         assert response.status_code == 200
 
 
+class TestPublicPathAuth:
+    @pytest.mark.parametrize("path", ["/status/liveness", "/status/readiness"])
+    def test_status_probes_are_anonymous(self, client, path):
+        assert client.get(path).status_code != 401
+
+    @pytest.mark.parametrize(
+        "path", ["/agents/list", "/static-evil/x", "/statusx", "/x/.well-known/y"]
+    )
+    def test_non_public_paths_still_require_auth(self, client, path):
+        assert client.get(path).status_code == 401
+
+
 class TestSpaAuthExclude:
     _mounts = [
         RouterMount(APIRouter(), "/agents", ["agents"]),

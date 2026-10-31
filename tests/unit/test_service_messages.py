@@ -137,3 +137,75 @@ class TestMessageService:
         assert repo.delete_by_id.call_count == 2
         repo.delete_by_id.assert_any_call("reply-msg-id", "test")
         repo.delete_by_id.assert_any_call("msg-1", "test")
+
+
+class TestPostMessageEndpoint:
+    @pytest.mark.asyncio
+    async def test_agent_runs_off_the_event_loop(self):
+        import threading
+
+        from agent_lab.interface.api.messages.endpoints import post_message
+        from agent_lab.interface.api.messages.schema import MessageRequest
+
+        agent_service = MagicMock()
+        agent_registry = MagicMock()
+        message_service = MagicMock()
+        threads = []
+
+        def process_message(*_args):
+            threads.append(threading.current_thread())
+            return MagicMock(message_content="ok", response_data=None, agent_id="a1")
+
+        agent_registry.get_agent.return_value.process_message.side_effect = (
+            process_message
+        )
+        message_service.create_message.side_effect = [
+            MagicMock(spec=Message),
+            Message(
+                id="m2",
+                is_active=True,
+                created_at="2026-01-01T00:00:00",
+                message_role="assistant",
+                message_content="ok",
+                agent_id="a1",
+            ),
+        ]
+
+        await post_message(
+            message_data=MessageRequest(
+                agent_id="a1", message_role="human", message_content="hi"
+            ),
+            agent_service=agent_service,
+            agent_registry=agent_registry,
+            message_service=message_service,
+            user=None,
+        )
+
+        assert threads and threads[0] is not threading.current_thread()
+
+
+class TestAgentRunLimiter:
+    @pytest.mark.asyncio
+    async def test_agent_runs_do_not_borrow_default_threadpool_tokens(self):
+        import anyio.to_thread
+
+        from agent_lab.services.agent_types.base import AGENT_RUN_LIMITER, run_agent
+
+        seen = {}
+        default_limiter = anyio.to_thread.current_default_thread_limiter()
+
+        def process_message(message, schema):
+            seen["default_borrowed"] = default_limiter.borrowed_tokens
+            seen["agent_borrowed"] = AGENT_RUN_LIMITER.borrowed_tokens
+            return f"{message}@{schema}"
+
+        agent = MagicMock()
+        agent.process_message.side_effect = process_message
+
+        assert await run_agent(agent, "hi", "test") == "hi@test"
+        assert seen == {"default_borrowed": 0, "agent_borrowed": 1}
+
+    def test_capacity_stays_below_checkpointer_pool(self):
+        from agent_lab.services.agent_types.base import AGENT_RUN_LIMITER
+
+        assert AGENT_RUN_LIMITER.total_tokens < 20

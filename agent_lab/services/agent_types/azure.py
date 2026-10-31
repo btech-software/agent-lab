@@ -1,6 +1,7 @@
 import json
 import os
 from abc import ABC
+from urllib.parse import quote
 
 import requests
 from langchain_core.tools import tool, BaseTool
@@ -43,8 +44,13 @@ class AzureEntraIdOrganizationWorkflowBase(ContactSupportAgentBase, ABC):
             "For example, you can search for 'John Doe' to retrieve relevant details about their position and team."
             """
             headers = {"Authorization": f"Bearer {self.get_token()}"}
-            url = f"https://graph.microsoft.com/v1.0/users?$filter=startswith(displayName,'{name}')"
-            response = requests.get(url, headers=headers)
+            # OData string literal: escape ' by doubling; requests URL-encodes params
+            odata_name = name.replace("'", "''")
+            response = requests.get(
+                "https://graph.microsoft.com/v1.0/users",
+                params={"$filter": f"startswith(displayName,'{odata_name}')"},
+                headers=headers,
+            )
             if response.status_code == 200:
                 users = response.json().get("value", [])
                 if users:
@@ -68,7 +74,7 @@ class AzureEntraIdOrganizationWorkflowBase(ContactSupportAgentBase, ABC):
             "For instance, providing 'jane.doe@example.com' will return details such as their full name, job title, and organizational affiliation."
             """
             headers = {"Authorization": f"Bearer {self.get_token()}"}
-            url = f"https://graph.microsoft.com/v1.0/users/{email}"
+            url = f"https://graph.microsoft.com/v1.0/users/{quote(email, safe='@')}"
             response = requests.get(url, headers=headers)
             if response.status_code == 200:
                 user = response.json()

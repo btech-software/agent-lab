@@ -9,6 +9,7 @@ from pydantic import Field
 from agent_lab.interface.mcp.prompt_registry import PromptRegistry
 from agent_lab.interface.mcp.registrar import McpRegistrar
 from agent_lab.interface.mcp.registrar_registration import discoverable_mcp_registrar
+from agent_lab.services.agent_types.base import run_agent
 from agent_lab.interface.mcp.schema import (
     AgentItem,
     MessageItem,
@@ -128,7 +129,8 @@ async def post_message(
         schema=schema,
     )
 
-    processed_message = matching_agent.process_message(message_request, schema)
+    # the agent run is synchronous: keep it off the event loop
+    processed_message = await run_agent(matching_agent, message_request, schema)
 
     assistant_message = message_service.create_message(
         message_role="assistant",

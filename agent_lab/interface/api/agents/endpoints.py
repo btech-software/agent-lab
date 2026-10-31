@@ -15,6 +15,7 @@ from fastapi_keycloak_middleware import get_user
 from typing_extensions import List, Annotated
 
 from agent_lab.core.container import Container
+from agent_lab.domain.exceptions.base import NotFoundError
 from agent_lab.domain.models import Agent as DomainAgent
 from agent_lab.infrastructure.auth.schema import User
 from agent_lab.infrastructure.auth.user import get_schema
@@ -501,7 +502,17 @@ async def task_updates_endpoint(
     task_notification_service: Annotated[
         TaskNotificationService, Depends(Provide[Container.task_notification_service])
     ],
+    agent_service: Annotated[AgentService, Depends(Provide[Container.agent_service])],
 ):
+    # stream only updates of agents that exist in the caller's own tenant
+    user: User | None = websocket.scope.get("user")
+    schema = get_schema(user.id if user is not None else None)
+    try:
+        agent_service.get_agent_by_id(agent_id, schema)
+    except NotFoundError:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     await websocket.accept()
     task_notification_service.subscribe()
     loop = asyncio.get_event_loop()

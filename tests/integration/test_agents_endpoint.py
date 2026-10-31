@@ -11,6 +11,12 @@ from agent_lab.main import app
 from agent_lab.services.tasks import TaskProgress
 
 
+def _websocket_auth_headers():
+    # browsers cannot set headers on websockets: fastapi-keycloak-middleware
+    # reads the bearer token from the access_token cookie instead
+    return {"Cookie": f"access_token=Bearer {os.getenv('ACCESS_TOKEN')}"}
+
+
 @pytest.fixture
 def client():
     yield TestClient(app)
@@ -395,14 +401,14 @@ class TestAgentsEndpoints:
     async def test_task_notification_websocket_receives_messages(
         self, client, container
     ):
-        # Use a test agent id to match the filter inside the endpoint
-        test_agent_id = "test_agent"
+        # the endpoint only streams updates for agents in the caller's tenant
+        test_agent_id = self._create_agent(client).json()["id"]
         ws_url = f"/agents/ws/task_updates/{test_agent_id}"
 
         with client.websocket_connect(
             ws_url,
             timeout=10,
-            headers={"Authorization": f"Bearer {os.getenv('ACCESS_TOKEN')}"},
+            headers=_websocket_auth_headers(),
         ) as websocket:
             task_notification_service = container.task_notification_service()
             task_notification_service.subscribe()
@@ -418,3 +424,15 @@ class TestAgentsEndpoints:
             assert received["agent_id"] == test_agent_id
             assert received["message_content"] == "Test Message"
             websocket.close()
+
+    @pytest.mark.asyncio
+    async def test_task_notification_websocket_rejects_unknown_agent(self, client):
+        from starlette.websockets import WebSocketDisconnect
+
+        with pytest.raises(WebSocketDisconnect) as disconnect:
+            with client.websocket_connect(
+                "/agents/ws/task_updates/agent-of-another-tenant",
+                headers=_websocket_auth_headers(),
+            ):
+                pass
+        assert disconnect.value.code == 1008

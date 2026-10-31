@@ -22,11 +22,11 @@ uvx cookiecutter /path/to/agent-lab --directory cookiecutter
 | `project_name` | `My Agent App` | Human-readable name; `project_slug` (kebab) and `package_name` (snake) derive from it |
 | `agent_lab_version` | current release | Lower bound of the generated `btech-agent-lab>=X.Y.Z,<X+1.0.0` dependency range; bumped automatically by semantic-release |
 | `github_repository` | `your-org/<slug>` | GitHub `owner/repo` of the generated project; used for the Flux git URL and the `ghcr.io/<owner>/<repo>` image reference |
-| `include_docker` | `true` | `docker/`, `compose.yml`, `config-docker.yml`, and the ReAct workflow example agent |
-| `include_github_actions` | `true` | `.github/workflows/ci.yml` (lint + tests) |
-| `include_testcontainers` | `true` | `tests/integration/` harness (Postgres, Redis, Vault) |
-| `include_claude_plugin` | `true` | `.claude-plugin/marketplace.json` + `plugins/<slug>-dev/` (feature-dev workflow plugin) |
-| `include_release_pipeline` | `true` | `.github/workflows/release.yml` (python-semantic-release) and `[tool.semantic_release]` in `pyproject.toml`; with `include_docker` also `docker-image.yml` (ghcr.io + cosign). Requires `include_github_actions` |
+| `include_docker` | `false` | `docker/`, `compose.yml`, `config-docker.yml`, and the ReAct workflow example agent |
+| `include_github_actions` | `false` | `.github/workflows/ci.yml` (lint + tests) |
+| `include_testcontainers` | `false` | `tests/integration/` harness (Postgres, Redis, Vault) |
+| `include_claude_plugin` | `false` | `.claude-plugin/marketplace.json` + `plugins/<slug>-dev/` (feature-dev workflow plugin) |
+| `include_release_pipeline` | `false` | `.github/workflows/release.yml` (python-semantic-release) and `[tool.semantic_release]` in `pyproject.toml`; with `include_docker` also `docker-image.yml` (ghcr.io + cosign). Requires `include_github_actions` |
 | `include_aks_gitops` | `false` | `terraform/aks/` (AKS cluster + Flux + Vault config), `gitops/` manifests, and `docs/one-time-setup.md`. Requires `include_docker` |
 | `auth_enabled` | `false` | Wires real `auth_*` values into the Vault `app_secrets` payload in `terraform/aks/03_vault_config`: declares `auth_url`/`auth_realm`/`auth_client_id`/`auth_client_secret` (sensitive) terraform variables supplied per environment at apply time. Requires `include_aks_gitops` |
 

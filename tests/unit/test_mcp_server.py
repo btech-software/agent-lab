@@ -279,6 +279,31 @@ class TestDefaultTools:
         )
         matching_agent.process_message.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_post_message_runs_agent_off_the_event_loop(self, _schema):
+        import threading
+
+        container = MagicMock()
+        container.agent_service.return_value.get_agent_by_id.return_value = MagicMock(
+            agent_type="test_echo"
+        )
+        matching_agent = container.agent_registry.return_value.get_agent.return_value
+        threads = []
+
+        def process_message(*_args):
+            threads.append(threading.current_thread())
+            return MagicMock(message_content="ok", response_data=None, agent_id="a1")
+
+        matching_agent.process_message.side_effect = process_message
+        container.message_service.return_value.create_message.side_effect = [
+            MagicMock(id="m1"),
+            MagicMock(id="m2", message_content="ok", agent_id="a1", response_data=None),
+        ]
+
+        await post_message(container, "a1", "hi")
+
+        assert threads and threads[0] is not threading.current_thread()
+
 
 class TestReadPromptMcp:
     @pytest.mark.asyncio

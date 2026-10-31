@@ -171,3 +171,40 @@ class TestAgentService:
             )
 
         repo.update_agent.assert_not_called()
+
+
+class TestTaskUpdatesWebsocketAuthorization:
+    def _websocket(self, user_id):
+        from unittest.mock import AsyncMock
+
+        from agent_lab.infrastructure.auth.schema import User
+
+        websocket = MagicMock()
+        websocket.scope = {"user": User(id=user_id, email="a@b.c", username="a")}
+        websocket.accept = AsyncMock()
+        websocket.close = AsyncMock()
+        return websocket
+
+    @pytest.mark.asyncio
+    async def test_foreign_agent_is_rejected_before_streaming(self):
+        from fastapi import status
+
+        from agent_lab.domain.repositories.agents import AgentNotFoundError
+        from agent_lab.interface.api.agents.endpoints import task_updates_endpoint
+
+        websocket = self._websocket("id_tenant-a")
+        agent_service = MagicMock()
+        agent_service.get_agent_by_id.side_effect = AgentNotFoundError("agent-b")
+        task_notification_service = MagicMock()
+
+        await task_updates_endpoint(
+            websocket=websocket,
+            agent_id="agent-b",
+            task_notification_service=task_notification_service,
+            agent_service=agent_service,
+        )
+
+        agent_service.get_agent_by_id.assert_called_once_with("agent-b", "id_tenant_a")
+        websocket.accept.assert_not_called()
+        websocket.close.assert_awaited_once_with(code=status.WS_1008_POLICY_VIOLATION)
+        task_notification_service.subscribe.assert_not_called()

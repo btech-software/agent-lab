@@ -60,3 +60,34 @@ class TestIntegrationService:
         service.delete_integration_by_id(integration_id="int-1", schema="test")
 
         repo.delete_by_id.assert_called_once_with("int-1", "test")
+
+
+class TestIntegrationCreateRequestEndpoint:
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            "file:///etc/passwd",
+            "gopher://internal:70/x",
+            "ftp://host/v1",
+            "redis://cache:6379",
+        ],
+    )
+    def test_rejects_non_http_schemes(self, endpoint):
+        from agent_lab.domain.exceptions.base import InvalidFieldError
+        from agent_lab.interface.api.integrations.schema import IntegrationCreateRequest
+
+        with pytest.raises(InvalidFieldError):
+            IntegrationCreateRequest(
+                integration_type="openai_api_v1", api_endpoint=endpoint, api_key="k"
+            )
+
+    @pytest.mark.parametrize(
+        "endpoint", ["https://api.openai.com/v1", "http://192.168.1.10:11434/v1"]
+    )
+    def test_accepts_http_and_https(self, endpoint):
+        from agent_lab.interface.api.integrations.schema import IntegrationCreateRequest
+
+        request = IntegrationCreateRequest(
+            integration_type="openai_api_v1", api_endpoint=endpoint, api_key="k"
+        )
+        assert request.api_endpoint == endpoint

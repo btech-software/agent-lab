@@ -109,3 +109,25 @@ class TestUploadAttachment:
         assert isinstance(result, AttachmentSchema)
         assert result.id == "att-1"
         service.create_attachment_with_file.assert_awaited_once()
+
+
+class TestEmbeddingsRequest:
+    @pytest.mark.parametrize("collection_name", ["", "   "])
+    def test_rejects_blank_collection_name(self, collection_name):
+        from agent_lab.domain.exceptions.base import InvalidFieldError
+        from agent_lab.interface.api.attachments.schema import EmbeddingsRequest
+
+        with pytest.raises(InvalidFieldError):
+            EmbeddingsRequest(
+                attachment_id="a",
+                language_model_id="l",
+                collection_name=collection_name,
+            )
+
+    def test_accepts_named_collection(self):
+        from agent_lab.interface.api.attachments.schema import EmbeddingsRequest
+
+        request = EmbeddingsRequest(
+            attachment_id="a", language_model_id="l", collection_name="kb"
+        )
+        assert request.collection_name == "kb"

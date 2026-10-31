@@ -323,6 +323,7 @@ class CoordinatorPlannerSupervisorAgent(SupervisedWorkflowAgentBase):
                 collection_name=collection_name,
                 query=execution_plan["thought"],
                 size=3,
+                schema=schema,
             )
             return "\n\n".join([doc.page_content for doc in thought_docs])
 

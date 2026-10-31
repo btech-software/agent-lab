@@ -6,7 +6,10 @@ import shlex
 import uuid
 from abc import ABC, abstractmethod
 from datetime import timedelta, datetime, timezone
+from urllib.parse import urlparse
 
+import anyio
+import anyio.to_thread
 import hvac
 import icalendar
 from browser_use import (
@@ -120,6 +123,17 @@ class StructuredOutputChatOpenAI(ChatOpenAI):
 JEV_DECISION_THRESHOLD = 0.5
 
 DecisionT = TypeVar("DecisionT")
+
+# Agent runs are synchronous and long: they run on worker threads with their own
+# limiter so they never take anyio's default tokens (used by sync endpoints
+# such as the status probes), and stay below the checkpointer pool (max 20).
+AGENT_RUN_LIMITER = anyio.CapacityLimiter(16)
+
+
+async def run_agent(agent: "AgentBase", message_request, schema: str):
+    return await anyio.to_thread.run_sync(
+        agent.process_message, message_request, schema, limiter=AGENT_RUN_LIMITER
+    )
 
 
 class DecisionState(MessagesState):
@@ -294,12 +308,23 @@ class AgentBase(ABC):
 
     def get_openai_client(self, agent_id: str, schema: str) -> OpenAI:
         agent = self.agent_service.get_agent_by_id(agent_id, schema)
-        _, integration = self.get_language_model_integration(agent, schema)
+        language_model, integration = self.get_language_model_integration(agent, schema)
         api_endpoint, api_key = self.get_integration_credentials(integration)
+
+        # same tenant "timeout" guardrail as get_chat_model; absent keeps SDK default
+        lm_settings = self.language_model_setting_service.get_language_model_settings(
+            language_model.id, schema
+        )
+        client_kwargs = {
+            "timeout": float(setting.setting_value)
+            for setting in lm_settings
+            if setting.setting_key == "timeout"
+        }
 
         return OpenAI(
             api_key=api_key,
             base_url=api_endpoint,
+            **client_kwargs,
         )
 
     def read_file_content(self, file_path: str) -> str:
@@ -868,6 +893,15 @@ class WebAgentBase(WorkflowAgentBase, ABC):
             markitdown = MarkItDown()
             results = []
             for url in urls:
+                parsed = urlparse(url)
+                if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                    results.append(
+                        {
+                            "url": url,
+                            "error": "unsupported source: expected an http(s) URL",
+                        }
+                    )
+                    continue
                 try:
                     results.append(
                         {"url": url, "content": markitdown.convert(url).text_content}

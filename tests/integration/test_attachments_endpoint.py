@@ -135,6 +135,53 @@ class TestAttachmentsEndpoint:
         assert embeddings_response["embeddings_collection"] == "static_document_data"
 
     @pytest.mark.asyncio
+    async def test_reembedding_does_not_duplicate_chunks(self, client):
+        from sqlalchemy import create_engine, text
+
+        upload_response = self._upload_file(client, "attachment.zip", "application/zip")
+        attachment_id = upload_response.json()["id"]
+        llm_id = self._create_llm(client).json()["id"]
+        engine = create_engine(
+            "postgresql://postgres:postgres@localhost:15432/agent_lab_vectors"
+        )
+
+        def chunk_count():
+            with engine.connect() as conn:
+                return conn.execute(
+                    text(
+                        "SELECT count(*) FROM langchain_pg_embedding "
+                        "WHERE cmetadata->>'attachment_id' = :id"
+                    ),
+                    {"id": attachment_id},
+                ).scalar_one()
+
+        assert (
+            self._create_embeddings(
+                client, attachment_id, llm_id, "reembed_a"
+            ).status_code
+            == 201
+        )
+        first = chunk_count()
+        assert first > 0
+
+        assert (
+            self._create_embeddings(
+                client, attachment_id, llm_id, "reembed_a"
+            ).status_code
+            == 201
+        )
+        assert chunk_count() == first
+
+        # moving to another collection drops the chunks from the previous one
+        assert (
+            self._create_embeddings(
+                client, attachment_id, llm_id, "reembed_b"
+            ).status_code
+            == 201
+        )
+        assert chunk_count() == first
+
+    @pytest.mark.asyncio
     async def test_embeddings_invalid_attachment(self, client):
         # Get a valid LLM for the test
         llm_response = self._create_llm(client)

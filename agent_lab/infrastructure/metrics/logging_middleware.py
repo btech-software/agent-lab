@@ -7,6 +7,15 @@ from agent_lab.infrastructure.metrics.tracer import excluded_paths
 
 logger = logging.getLogger(__name__)
 
+_REDACTED_HEADERS = {"authorization", "cookie", "set-cookie", "proxy-authorization"}
+
+
+def _redact(headers) -> dict:
+    return {
+        key: ("***" if key.lower() in _REDACTED_HEADERS else value)
+        for key, value in headers.items()
+    }
+
 
 class LoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(
@@ -18,7 +27,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
         # Log incoming request details
         logger.info(f"Incoming request {request.method}: {request.url}")
-        logger.debug(f"Request headers: {request.headers}")
+        logger.debug(f"Request headers: {_redact(request.headers)}")
         start_time = time.time()
         try:
             response = await call_next(request)
@@ -31,5 +40,5 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         logger.info(
             f"Outgoing response {response.status_code} for {request.method}: {request.url} (time: {process_time:.2f} ms)"
         )
-        logger.debug(f"Response headers: {response.headers}")
+        logger.debug(f"Response headers: {_redact(response.headers)}")
         return response

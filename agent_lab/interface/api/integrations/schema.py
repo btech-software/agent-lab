@@ -22,7 +22,7 @@ class IntegrationCreateRequest(BaseModel):
     @field_validator("api_endpoint")
     def validate_api_endpoint(cls, v):
         parsed = urlparse(v)
-        if not all([parsed.scheme, parsed.netloc]):
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise InvalidFieldError("api_endpoint", "invalid url format")
         return v
 

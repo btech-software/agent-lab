@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from uuid import uuid4
 
@@ -7,6 +8,8 @@ from typing_extensions import Iterator
 from agent_lab.domain.exceptions.base import NotFoundError
 from agent_lab.domain.models import Integration
 from agent_lab.infrastructure.database.sql import Database
+
+logger = logging.getLogger(__name__)
 
 
 class IntegrationRepository:
@@ -42,17 +45,25 @@ class IntegrationRepository:
             secret={"api_endpoint": api_endpoint, "api_key": api_key},
         )
 
-        with self.db.session(schema_name=schema) as session:
-            integration = Integration(
-                id=str(gen_id),
-                created_at=datetime.now(),
-                is_active=True,
-                integration_type=integration_type,
-            )
-            session.add(integration)
-            session.commit()
-            session.refresh(integration)
-            return integration
+        committed = False
+        try:
+            with self.db.session(schema_name=schema) as session:
+                integration = Integration(
+                    id=str(gen_id),
+                    created_at=datetime.now(),
+                    is_active=True,
+                    integration_type=integration_type,
+                )
+                session.add(integration)
+                session.commit()
+                committed = True
+                session.refresh(integration)
+                return integration
+        except Exception:
+            # only an uncommitted row leaves the secret orphaned
+            if not committed:
+                self._discard_secret(str(gen_id))
+            raise
 
     def delete_by_id(self, integration_id: str, schema: str) -> None:
         with self.db.session(schema_name=schema) as session:
@@ -66,6 +77,15 @@ class IntegrationRepository:
 
             entity.is_active = False
             session.commit()
+        self._discard_secret(integration_id)
+
+    def _discard_secret(self, integration_id: str) -> None:
+        # best effort: a Vault failure must not mask the caller's outcome
+        path = f"integration_{integration_id}"
+        try:
+            self.vault_client.secrets.kv.v2.delete_metadata_and_all_versions(path=path)
+        except Exception:
+            logger.exception(f"Could not delete Vault secret {path}")
 
 
 class IntegrationNotFoundError(NotFoundError):
