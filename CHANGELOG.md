@@ -2,6 +2,33 @@
 
 <!-- version list -->
 
+## v1.17.10 (2026-10-31)
+
+### Bug Fixes
+
+- Adjust agents parallel execution ([#421](https://github.com/btech-software/agent-lab/pull/421),
+  [`bdb6f19`](https://github.com/btech-software/agent-lab/commit/bdb6f198bee67374538b5a1d8280da6a3eb09286))
+
+- Cookiecutter adjusts, defaults to false
+  ([#421](https://github.com/btech-software/agent-lab/pull/421),
+  [`bdb6f19`](https://github.com/btech-software/agent-lab/commit/bdb6f198bee67374538b5a1d8280da6a3eb09286))
+
+- Oct patch 3 ([#421](https://github.com/btech-software/agent-lab/pull/421),
+  [`bdb6f19`](https://github.com/btech-software/agent-lab/commit/bdb6f198bee67374538b5a1d8280da6a3eb09286))
+
+- Security audit findings 1 ([#421](https://github.com/btech-software/agent-lab/pull/421),
+  [`bdb6f19`](https://github.com/btech-software/agent-lab/commit/bdb6f198bee67374538b5a1d8280da6a3eb09286))
+
+- Security audit findings 2 ([#421](https://github.com/btech-software/agent-lab/pull/421),
+  [`bdb6f19`](https://github.com/btech-software/agent-lab/commit/bdb6f198bee67374538b5a1d8280da6a3eb09286))
+
+### Build System
+
+- **deps**: Bump the uv-minor-patch group with 6 updates
+  ([#420](https://github.com/btech-software/agent-lab/pull/420),
+  [`c8918fe`](https://github.com/btech-software/agent-lab/commit/c8918fe44dcb70ec6b01f694e405a61928bdcf64))
+
+
 ## v1.17.9 (2026-10-25)
 
 ### Bug Fixes
