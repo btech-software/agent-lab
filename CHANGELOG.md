@@ -2,6 +2,45 @@
 
 <!-- version list -->
 
+## v1.17.11 (2026-11-02)
+
+### Bug Fixes
+
+- Adds input / output logging to litellm
+  ([#429](https://github.com/btech-software/agent-lab/pull/429),
+  [`aeb775f`](https://github.com/btech-software/agent-lab/commit/aeb775f2ba006efc8650136df4bb56b341b5f9af))
+
+### Build System
+
+- **deps**: Bump authlib from 1.7.2 to 1.9.1
+  ([#423](https://github.com/btech-software/agent-lab/pull/423),
+  [`720baf9`](https://github.com/btech-software/agent-lab/commit/720baf953cc6b195780fa9a08324a76315485c28))
+
+- **deps**: Bump dnspython from 2.8.0 to 2.9.0
+  ([#428](https://github.com/btech-software/agent-lab/pull/428),
+  [`60f501d`](https://github.com/btech-software/agent-lab/commit/60f501d6dbfd23f8dd65d7a54233705fc811c8af))
+
+- **deps**: Bump filelock from 3.32.7 to 4.2.1
+  ([#427](https://github.com/btech-software/agent-lab/pull/427),
+  [`9065725`](https://github.com/btech-software/agent-lab/commit/9065725f3aa26f1330b438503454ff363a482b9d))
+
+- **deps**: Bump joserfc from 1.7.3 to 1.7.6
+  ([#425](https://github.com/btech-software/agent-lab/pull/425),
+  [`6fd70e9`](https://github.com/btech-software/agent-lab/commit/6fd70e91a48dd3c9cc80934e7e0eb51ee0f91596))
+
+- **deps**: Bump pyasn1 from 0.6.4 to 0.6.5
+  ([#422](https://github.com/btech-software/agent-lab/pull/422),
+  [`5805ff6`](https://github.com/btech-software/agent-lab/commit/5805ff61a3df410ffe5175158a5b34cbd9eb20fd))
+
+- **deps**: Bump pypdf from 6.21.2 to 6.21.4
+  ([#424](https://github.com/btech-software/agent-lab/pull/424),
+  [`6e0c272`](https://github.com/btech-software/agent-lab/commit/6e0c272059b986c43706f72479c59b61957d887c))
+
+- **deps**: Bump tornado from 6.5.10 to 6.6
+  ([#426](https://github.com/btech-software/agent-lab/pull/426),
+  [`a09098a`](https://github.com/btech-software/agent-lab/commit/a09098a3fd73bb93e742af53635cdff84d637b87))
+
+
 ## v1.17.10 (2026-10-31)
 
 ### Bug Fixes
