@@ -235,6 +235,13 @@ resource "helm_release" "litellm" {
         general_settings = {
           master_key = "os.environ/PROXY_MASTER_KEY"
 
+          # Persist request/response bodies in LiteLLM_SpendLogs so the Admin
+          # UI's Logs view can show them; only affects requests made after
+          # rollout. store_model_in_db lets the UI manage models in Postgres
+          # alongside the model_list above.
+          store_model_in_db           = true
+          store_prompts_in_spend_logs = true
+
           coordination_redis = {
             host = "redis.${kubernetes_namespace_v1.litellm.metadata[0].name}.svc.cluster.local"
             port = 6379
