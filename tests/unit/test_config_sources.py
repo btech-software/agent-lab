@@ -139,3 +139,98 @@ class TestVaultTlsVerification:
         monkeypatch.delenv("VAULT_SKIP_VERIFY", raising=False)
         monkeypatch.delenv("VAULT_CACERT", raising=False)
         assert Container.vault_client.kwargs["verify"]() is True
+
+
+class TestKubernetesVaultClientRelogin:
+    """The container shares one Vault client for the process, so a Kubernetes
+    login token must be replaced before its lease (the role's token_ttl) ends."""
+
+    def _client(self, tmp_path, lease_duration=3600):
+        from agent_lab.core.config import build_vault_client
+
+        jwt_path = tmp_path / "token"
+        jwt_path.write_text("sa-jwt")
+        calls = []
+
+        def fake_request(adapter, method, url, headers=None, **kwargs):
+            calls.append((method, url, adapter.token))
+            if url == "/v1/auth/kubernetes/login":
+                assert kwargs["json"] == {"role": "my-app", "jwt": "sa-jwt"}
+                login_number = sum(1 for c in calls if c[1] == url)
+                return {
+                    "auth": {
+                        "client_token": f"token-{login_number}",
+                        "lease_duration": lease_duration,
+                    }
+                }
+            return {"data": {"data": {"k": "v"}}}
+
+        client = build_vault_client(
+            url="http://vault:8200",
+            token="startup-token",
+            verify=True,
+            k8s_role="my-app",
+            k8s_jwt_path=str(jwt_path),
+        )
+        return client, calls, fake_request
+
+    def _read(self, client):
+        client.secrets.kv.read_secret_version(
+            path="integration_1", raise_on_deleted_version=False
+        )
+
+    def test_logs_in_before_first_request_and_reuses_token(self, tmp_path):
+        client, calls, fake_request = self._client(tmp_path)
+        with (
+            patch("hvac.adapters.JSONAdapter.request", fake_request),
+            patch("agent_lab.core.config.time.monotonic", return_value=1000.0),
+        ):
+            self._read(client)
+            self._read(client)
+
+        assert [(c[1], c[2]) for c in calls] == [
+            ("/v1/auth/kubernetes/login", "startup-token"),
+            ("/v1/secret/data/integration_1", "token-1"),
+            ("/v1/secret/data/integration_1", "token-1"),
+        ]
+
+    def test_logs_in_again_before_lease_expires(self, tmp_path):
+        client, calls, fake_request = self._client(tmp_path, lease_duration=3600)
+        clock = [1000.0]
+        with (
+            patch("hvac.adapters.JSONAdapter.request", fake_request),
+            patch("agent_lab.core.config.time.monotonic", lambda: clock[0]),
+        ):
+            self._read(client)
+            clock[0] += 3600 * 0.9  # still inside the lease
+            self._read(client)
+
+        logins = [c for c in calls if c[1] == "/v1/auth/kubernetes/login"]
+        assert len(logins) == 2
+        assert calls[-1] == ("get", "/v1/secret/data/integration_1", "token-2")
+
+    def test_static_token_client_without_role(self):
+        from agent_lab.core.config import build_vault_client
+
+        client = build_vault_client(
+            url="http://vault:8200", token="root", verify=True, k8s_role=None
+        )
+
+        assert client.token == "root"
+
+
+def test_kubernetes_source_passes_role_to_client_config(tmp_path):
+    jwt_path = tmp_path / "token"
+    jwt_path.write_text("sa-jwt")
+    source = KubernetesVaultConfigSource(
+        url="http://vault:8200", role="my-app", jwt_path=str(jwt_path)
+    )
+
+    with patch("hvac.Client") as client_cls:
+        client_cls.return_value.secrets.kv.read_secret_version.return_value = {
+            "data": {"data": APP_SECRETS}
+        }
+        config = source.load()
+
+    assert config["vault"]["k8s_role"] == "my-app"
+    assert config["vault"]["k8s_jwt_path"] == str(jwt_path)

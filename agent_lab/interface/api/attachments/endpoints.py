@@ -1,4 +1,5 @@
 from io import BytesIO
+from urllib.parse import quote
 
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, File, Depends, Body, Path, UploadFile
@@ -222,8 +223,13 @@ async def download_attachment(
         BytesIO(attachment.raw_content),
         media_type="application/octet-stream",
     )
+    # Header values are latin-1: send an ASCII fallback plus the RFC 5987 UTF-8 name.
+    name = attachment.file_name
+    fallback = "".join(
+        c if c.isascii() and c.isprintable() and c not in '"\\' else "?" for c in name
+    )
     response.headers["Content-Disposition"] = (
-        f"attachment; filename={attachment.file_name}"
+        f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(name, safe='')}"
     )
     return response
 

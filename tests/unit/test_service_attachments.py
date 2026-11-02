@@ -298,6 +298,16 @@ class TestOptimizeAudio:
         with pytest.raises(AudioOptimizationError):
             service.optimize_audio("missing.wav")
 
+    @patch("agent_lab.services.attachments.subprocess.run")
+    def test_optimize_audio_missing_ffmpeg_raises(
+        self, subprocess_run, attachment_service
+    ):
+        service, *_ = attachment_service
+        subprocess_run.side_effect = FileNotFoundError(2, "No such file", "ffmpeg")
+
+        with pytest.raises(AudioOptimizationError):
+            service.optimize_audio("memo.wav")
+
 
 class TestEmbeddingsLifecycle:
     def _wire(self, attachment_service, previous_collection=None):

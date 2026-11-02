@@ -3,7 +3,11 @@ from unittest.mock import MagicMock, AsyncMock
 
 import pytest
 
-from agent_lab.interface.api.attachments.endpoints import get_list, upload_attachment
+from agent_lab.interface.api.attachments.endpoints import (
+    download_attachment,
+    get_list,
+    upload_attachment,
+)
 from agent_lab.interface.api.attachments.schema import Attachment as AttachmentSchema
 from agent_lab.domain.exceptions.base import FileToLargeError
 
@@ -131,3 +135,33 @@ class TestEmbeddingsRequest:
             attachment_id="a", language_model_id="l", collection_name="kb"
         )
         assert request.collection_name == "kb"
+
+
+class TestDownloadAttachment:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "file_name, fallback, encoded",
+        [
+            ("report.pdf", "report.pdf", "report.pdf"),
+            ("relatório.pdf", "relat?rio.pdf", "relat%C3%B3rio.pdf"),
+            ("报告 1.pdf", "?? 1.pdf", "%E6%8A%A5%E5%91%8A%201.pdf"),
+            ('a"b\\c.txt', "a?b?c.txt", "a%22b%5Cc.txt"),
+            ("a\r\nb.txt", "a??b.txt", "a%0D%0Ab.txt"),
+        ],
+    )
+    async def test_content_disposition_is_rfc5987_encoded(
+        self, file_name, fallback, encoded
+    ):
+        attachment = MagicMock()
+        attachment.file_name = file_name
+        attachment.raw_content = b"bytes"
+        service = MagicMock()
+        service.get_attachment_by_id.return_value = attachment
+
+        response = await download_attachment(
+            attachment_id="att-1", attachment_service=service, user=_make_user()
+        )
+
+        assert response.headers["content-disposition"] == (
+            f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+        )

@@ -175,6 +175,16 @@ def setup_auth(container, application, mounts: List[RouterMount]):
             realm=config["auth"]["realm"],
             client_id=config["auth"]["client_id"],
             client_secret=config["auth"]["client_secret"],
+            # Only accept tokens this realm issued to this client. Keycloak's
+            # default aud ("account") is shared by every client, so bind azp.
+            validation_options={
+                "check_claims": {
+                    "iss": f"{config['auth']['url']}/realms/{config['auth']['realm']}",
+                    "azp": config["auth"]["client_id"],
+                    # an explicit check_claims replaces jwcrypto's default exp check
+                    "exp": None,
+                }
+            },
         )
 
         exclude_patterns = [
