@@ -1,7 +1,6 @@
-import hvac
 from dependency_injector import containers, providers
 
-from agent_lab.core.config import vault_tls_verify
+from agent_lab.core.config import build_vault_client, vault_tls_verify
 from agent_lab.domain.repositories.agents import AgentRepository, AgentSettingRepository
 from agent_lab.domain.repositories.attachments import AttachmentRepository
 from agent_lab.domain.repositories.integrations import IntegrationRepository
@@ -61,10 +60,12 @@ class Container(containers.DeclarativeContainer):
     )
 
     vault_client = providers.Singleton(
-        hvac.Client,
+        build_vault_client,
         url=config.vault.url,
         token=config.vault.token,
         verify=providers.Callable(vault_tls_verify),
+        k8s_role=config.vault.k8s_role,
+        k8s_jwt_path=config.vault.k8s_jwt_path,
     )
 
     document_repository = providers.Factory(

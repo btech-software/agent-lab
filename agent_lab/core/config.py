@@ -1,5 +1,9 @@
 import os
+import threading
+import time
 from abc import ABC, abstractmethod
+
+from hvac.adapters import JSONAdapter
 
 
 class ConfigSource(ABC):
@@ -118,7 +122,68 @@ class KubernetesVaultConfigSource(VaultConfigSource):
         with open(self.jwt_path) as jwt_file:
             client.auth.kubernetes.login(role=self.role, jwt=jwt_file.read())
         self.token = client.token
-        return super().load()
+        config = super().load()
+        # lets the container's long-lived client log in again (build_vault_client)
+        config["vault"]["k8s_role"] = self.role
+        config["vault"]["k8s_jwt_path"] = self.jwt_path
+        return config
+
+
+class KubernetesLoginAdapter(JSONAdapter):
+    """hvac adapter that logs in with the pod's ServiceAccount token and logs
+    in again once 80% of the token's lease has passed, so a process-wide
+    client never sends an expired token."""
+
+    def __init__(self, *args, role: str, jwt_path: str, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.role = role
+        self.jwt_path = jwt_path
+        # the startup token's lease is unknown: log in on first use
+        self._renew_at = 0.0
+        self._lock = threading.Lock()
+
+    def request(self, method, url, headers=None, raise_exception=True, **kwargs):
+        self._ensure_token()
+        return super().request(
+            method, url, headers=headers, raise_exception=raise_exception, **kwargs
+        )
+
+    def _ensure_token(self):
+        with self._lock:
+            if time.monotonic() < self._renew_at:
+                return
+            with open(self.jwt_path) as jwt_file:
+                jwt = jwt_file.read()
+            # super().request: bypass _ensure_token for the login call itself
+            response = super().request(
+                "post",
+                "/v1/auth/kubernetes/login",
+                json={"role": self.role, "jwt": jwt},
+            )
+            self.token = self.get_login_token(response)
+            lease = response["auth"]["lease_duration"]
+            self._renew_at = time.monotonic() + lease * 0.8 if lease else float("inf")
+
+
+def build_vault_client(
+    url: str,
+    token: str | None,
+    verify: bool | str,
+    k8s_role: str | None = None,
+    k8s_jwt_path: str | None = None,
+):
+    import hvac
+
+    if k8s_role:
+        return hvac.Client(
+            url=url,
+            token=token,
+            verify=verify,
+            adapter=KubernetesLoginAdapter,
+            role=k8s_role,
+            jwt_path=k8s_jwt_path or SERVICE_ACCOUNT_TOKEN_PATH,
+        )
+    return hvac.Client(url=url, token=token, verify=verify)
 
 
 def default_config_source() -> ConfigSource:

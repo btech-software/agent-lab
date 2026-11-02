@@ -196,7 +196,8 @@ class AttachmentService:
                 optimized_audio = file.read()
 
             return optimized_audio
-        except subprocess.CalledProcessError as e:
+        # FileNotFoundError: the ffmpeg binary is not installed in this image
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
             raise AudioOptimizationError(e)
