@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.17.12 (2026-11-02)
+
+### Bug Fixes
+
+- Security audit findings ([#430](https://github.com/btech-software/agent-lab/pull/430),
+  [`cc5d016`](https://github.com/btech-software/agent-lab/commit/cc5d016ff10490cbcaafb7d0e4ec31fffeaf2635))
+
+
 ## v1.17.11 (2026-11-02)
 
 ### Bug Fixes

@@ -3,6 +3,6 @@ name: agent-lab
 description: Agent-Lab is a comprehensive toolkit designed for developing and testing LLM agents.
 # python-semantic-release stamps both "version" and "appVersion"; its pattern
 # can run from one key into the next, so keep a "key: value" line between them
-version: "1.17.11"
+version: "1.17.12"
 type: application
-appVersion: "1.17.11"
+appVersion: "1.17.12"
