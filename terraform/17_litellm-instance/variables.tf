@@ -17,13 +17,13 @@ variable "pg_image" {
 
 variable "litellm_chart_version" {
   type        = string
-  default     = "1.106.2"
+  default     = "1.110.2"
   description = "litellm-helm chart version (OCI: ghcr.io/berriai/litellm-helm). Do NOT use 1.107.0: that release was compromised (supply-chain attack, pulled from PyPI/GHCR/Docker Hub on 2026-10-21)."
 }
 
 variable "litellm_image_tag" {
   type        = string
-  default     = "v1.106.2"
+  default     = "v1.110.2"
   description = "LiteLLM proxy image tag (pinned; chart appVersion is 'latest' and must not be relied on). Do NOT use v1.107.0 or :latest/:main-stable: compromised 2026-10-21, see docs.litellm.ai/blog/security-incident-oct-21-2026."
 }
 
