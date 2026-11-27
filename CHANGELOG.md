@@ -2,6 +2,53 @@
 
 <!-- version list -->
 
+## v1.17.13 (2026-11-27)
+
+### Bug Fixes
+
+- Pin browser-use below 1.0 so template bakes stay importable
+  ([#442](https://github.com/btech-software/agent-lab/pull/442),
+  [`52537a3`](https://github.com/btech-software/agent-lab/commit/52537a30976a5a4b7ae372a1d9ce626bc2534b69))
+
+- Streaming adjusts on litellm + cloudflare
+  ([#444](https://github.com/btech-software/agent-lab/pull/444),
+  [`3b57163`](https://github.com/btech-software/agent-lab/commit/3b571631d6403c2d2d7ab75d724d4e171c523ef3))
+
+### Build System
+
+- **deps**: Bump dnspython from 2.9.0 to 2.9.2
+  ([#438](https://github.com/btech-software/agent-lab/pull/438),
+  [`e1508f7`](https://github.com/btech-software/agent-lab/commit/e1508f7a06ff7c61ad4d9e459bad01732989f20e))
+
+- **deps**: Bump oauthlib from 4.0.0 to 4.0.1
+  ([#434](https://github.com/btech-software/agent-lab/pull/434),
+  [`f18e60a`](https://github.com/btech-software/agent-lab/commit/f18e60af40d17f052b34b4da948ea60da346016c))
+
+- **deps**: Bump soupsieve from 3.0.3 to 4.0
+  ([#437](https://github.com/btech-software/agent-lab/pull/437),
+  [`ffc0541`](https://github.com/btech-software/agent-lab/commit/ffc0541a01240de7c713a0d126428c86d3c0bc59))
+
+- **deps**: Bump the uv-minor-patch group across 1 directory with 16 updates
+  ([#435](https://github.com/btech-software/agent-lab/pull/435),
+  [`275683c`](https://github.com/btech-software/agent-lab/commit/275683cedaad44da310d33c35180bf0707dcc003))
+
+- **deps**: Bump the uv-minor-patch group across 1 directory with 22 updates
+  ([#443](https://github.com/btech-software/agent-lab/pull/443),
+  [`6cd5e8f`](https://github.com/btech-software/agent-lab/commit/6cd5e8fca674ffb80ad328535f64889a3dbb160b))
+
+- **deps**: Bump tornado from 6.6 to 6.6.1
+  ([#439](https://github.com/btech-software/agent-lab/pull/439),
+  [`f148960`](https://github.com/btech-software/agent-lab/commit/f148960d8b2edde0f292acd109030608c07b6850))
+
+- **deps**: Update fastapi[standard] requirement from ~=0.139.0 to >=0.139,<0.163
+  ([#433](https://github.com/btech-software/agent-lab/pull/433),
+  [`04b392b`](https://github.com/btech-software/agent-lab/commit/04b392b82cfa60189e5ab7999ee4418580d5435f))
+
+- **deps-dev**: Bump langfuse from 4.14.1 to 5.1.0
+  ([#432](https://github.com/btech-software/agent-lab/pull/432),
+  [`24f058b`](https://github.com/btech-software/agent-lab/commit/24f058bf19c5772fd7619e6bee52f2461e692b17))
+
+
 ## v1.17.12 (2026-11-02)
 
 ### Bug Fixes
