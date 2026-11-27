@@ -37,8 +37,9 @@ resource "kubernetes_namespace_v1" "litellm" {
 
 # Operator-managed Redis (OT container-kit), mirroring the langfuse module.
 # Deployed passwordless for LiteLLM coordination (cross-pod rate limits, spend
-# tracking, pod lock manager). The chart names the Service `redis` regardless
-# of release name, so the coordination endpoint is redis.<ns>.svc.cluster.local.
+# tracking, pod lock manager). The operator names the Service after the release
+# (redis-litellm, plus -headless/-additional), so the coordination endpoint is
+# <release>.<ns>.svc.cluster.local; a bare `redis` host does not resolve.
 resource "helm_release" "redis_litellm" {
   name       = "redis-litellm"
   repository = "https://ot-container-kit.github.io/helm-charts/"
@@ -228,8 +229,16 @@ resource "helm_release" "litellm" {
         # callback is avoided: it needs the v4 SDK, the image bundles v2.
         # smtp_email sends proxy notifications (key created, budget alerts)
         # through the SMTP_* settings in the litellm-env secret.
+        #
+        # sse_keepalive_ping_interval_seconds: on a streamed request LiteLLM
+        # otherwise holds the response headers until the upstream's first chunk,
+        # so a long cold prefill (~2,050 tok/s on the 2x Spark DeepSeek server:
+        # a 250K-token prompt is ~2 minutes) sends Cloudflare no bytes and it
+        # answers 524 at ~125 s. With this set, headers go out at once and an
+        # SSE comment (": ping") fills each 20 s of upstream silence.
         litellm_settings = {
-          callbacks = ["langfuse_otel", "smtp_email"]
+          callbacks                           = ["langfuse_otel", "smtp_email"]
+          sse_keepalive_ping_interval_seconds = 20
         }
 
         general_settings = {
@@ -243,7 +252,7 @@ resource "helm_release" "litellm" {
           store_prompts_in_spend_logs = true
 
           coordination_redis = {
-            host = "redis.${kubernetes_namespace_v1.litellm.metadata[0].name}.svc.cluster.local"
+            host = "${helm_release.redis_litellm.name}.${kubernetes_namespace_v1.litellm.metadata[0].name}.svc.cluster.local"
             port = 6379
           }
         }
